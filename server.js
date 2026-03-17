@@ -593,36 +593,13 @@ app.post("/api/openai-batch/resume", async (req, res) => {
 // API: Get Session Status
 app.get("/api/openai-batch/session/status", async (req, res) => {
     try {
+        // Lightweight: only query the small openai_batch_jobs collection
         const activeJobs = await db.collection("openai_batch_jobs")
             .find({ status: { $in: ["validating", "in_progress", "finalizing", "in_queue"] } })
+            .project({ influencer_ids: 1 })
             .toArray();
 
-        let activeInfluencerIds = [];
-        for (const job of activeJobs) {
-            if (job.influencer_ids) {
-                // Ensure they map to strings so $nin comparison is safe, or ObjectIds if DB uses them.
-                activeInfluencerIds.push(...job.influencer_ids
-                    .filter(id => (typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)) || (id && typeof id === 'object'))
-                    .map(id => typeof id === 'string' ? new ObjectId(id) : id));
-            }
-        }
-
-        // Exclude both active (in-progress) AND already-processed (completed) influencer IDs
-        const allExcludedIds = [
-            ...activeInfluencerIds,
-            ...[...cachedProcessedIds]
-                .filter(id => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id))
-                .map(id => new ObjectId(id))
-        ];
-
-        const count = await db.collection(INFLUENCER_COLLECTION).countDocuments({
-            "instagram.follower_count_actual": { $gte: 1000 },
-            "instagram.media_count": { $gte: 10 },
-            "instagram.is_private": false,
-            ...(allExcludedIds.length > 0 ? { _id: { $nin: allExcludedIds } } : {})
-        });
-
-
+        const queuedCount = activeJobs.reduce((sum, j) => sum + (j.influencer_ids?.length || 0), 0);
 
         // Get the latest batch_id from DB
         const latestJob = await db.collection("openai_batch_jobs")
@@ -635,8 +612,8 @@ app.get("/api/openai-batch/session/status", async (req, res) => {
 
         res.json({
             ...getOrchestratorStatus(),
-            pendingDBCount: count,
-            queuedCount: activeInfluencerIds.length,
+            pendingDBCount: cachedStats.pending,
+            queuedCount,
             latestBatchId
         });
     } catch (err) {
