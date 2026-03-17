@@ -70,8 +70,12 @@ async function connectDB() {
     // Load cached IDs of influencers that have posts (non-blocking)
     refreshIdsWithPosts();
     refreshProcessedIds();
-    setInterval(refreshIdsWithPosts, 60000); // Refresh every 60 seconds
-    setInterval(refreshProcessedIds, 60000); // Refresh every 60 seconds
+    setInterval(refreshIdsWithPosts, 60000);
+    setInterval(refreshProcessedIds, 60000);
+
+    // Initial stats computation (runs after caches are ready)
+    setTimeout(refreshStats, 5000);
+    setInterval(refreshStats, 60000);
 }
 
 // Cached set of influencer IDs that have posts in instagram_post_reports
@@ -123,65 +127,74 @@ async function chunkedCount(collection, baseQuery, ids, idField = '_id', chunkSi
     return total;
 }
 
+// ── Background-cached stats (computed every 60s, served instantly) ──
+let cachedStats = { total: 0, processed: 0, withCategory: 0, noCategory: 0, pending: 0, totalCost: 0 };
+let statsReady = false;
+
+async function refreshStats() {
+    try {
+        const objectIdsWithPosts = [...cachedIdsWithPosts]
+            .filter(id => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id))
+            .map(id => new ObjectId(id));
+
+        const total = await chunkedCount(
+            db.collection(INFLUENCER_COLLECTION),
+            {
+                "instagram.follower_count_actual": { $gte: 1000 },
+                "instagram.media_count": { $gte: 10 },
+                "instagram.is_private": false,
+            },
+            objectIdsWithPosts
+        );
+
+        const processedIds = objectIdsWithPosts.filter(id => cachedProcessedIds.has(id.toString()));
+        const processed = await chunkedCount(
+            db.collection(INFLUENCER_COLLECTION),
+            {
+                "instagram.follower_count_actual": { $gte: 1000 },
+                "instagram.media_count": { $gte: 10 },
+                "instagram.is_private": false,
+            },
+            processedIds
+        );
+
+        const withCategory = await chunkedCount(
+            db.collection(INFLUENCER_COLLECTION),
+            {
+                "instagram.follower_count_actual": { $gte: 1000 },
+                "instagram.media_count": { $gte: 10 },
+                "instagram.is_private": false,
+                "instagram.category": { $ne: null, $exists: true },
+            },
+            processedIds
+        );
+
+        const noCategory = processed - withCategory;
+        const pending = total - processed;
+
+        const costResult = await db.collection("openai_batch_jobs").aggregate([
+            { $match: { status: "completed" } },
+            { $group: { _id: null, total: { $sum: "$cost" } } }
+        ]).toArray();
+        const totalCost = costResult.length > 0 ? costResult[0].total : 0;
+
+        cachedStats = { total, processed, withCategory, noCategory, pending, totalCost };
+        statsReady = true;
+        console.log(`📊 Stats refreshed: total=${total}, processed=${processed}, pending=${pending}`);
+    } catch (e) {
+        console.error("Failed to refresh stats:", e.message);
+    }
+}
+
 // SSE broadcast
 function broadcast(data) {
     const msg = `data: ${JSON.stringify(data)}\n\n`;
     batchState.sseClients.forEach((res) => res.write(msg));
 }
 
-// API: Get stats (all scoped to eligible influencers: filters + has posts)
-app.get("/api/stats", async (req, res) => {
-    // Eligible = meets filters + has posts
-    const objectIdsWithPosts = [...cachedIdsWithPosts]
-        .filter(id => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id))
-        .map(id => new ObjectId(id));
-
-    const total = await chunkedCount(
-        db.collection(INFLUENCER_COLLECTION),
-        {
-            "instagram.follower_count_actual": { $gte: 1000 },
-            "instagram.media_count": { $gte: 10 },
-            "instagram.is_private": false,
-        },
-        objectIdsWithPosts
-    );
-
-    // Processed = eligible influencers that are in any batch job
-    const processedIds = objectIdsWithPosts.filter(id => cachedProcessedIds.has(id.toString()));
-    const processed = await chunkedCount(
-        db.collection(INFLUENCER_COLLECTION),
-        {
-            "instagram.follower_count_actual": { $gte: 1000 },
-            "instagram.media_count": { $gte: 10 },
-            "instagram.is_private": false,
-        },
-        processedIds
-    );
-
-    // With category = eligible + processed + has non-null category
-    const withCategory = await chunkedCount(
-        db.collection(INFLUENCER_COLLECTION),
-        {
-            "instagram.follower_count_actual": { $gte: 1000 },
-            "instagram.media_count": { $gte: 10 },
-            "instagram.is_private": false,
-            "instagram.category": { $ne: null, $exists: true },
-        },
-        processedIds
-    );
-
-    const noCategory = processed - withCategory;
-    const pending = total - processed;
-
-    // Calculate total cost from openai_batch_jobs
-    const costResult = await db.collection("openai_batch_jobs").aggregate([
-        { $match: { status: "completed" } },
-        { $group: { _id: null, total: { $sum: "$cost" } } }
-    ]).toArray();
-
-    const totalCost = costResult.length > 0 ? costResult[0].total : 0;
-
-    res.json({ total, processed, withCategory, noCategory, pending, totalCost, running: batchState.running });
+// API: Get stats (served instantly from background cache)
+app.get("/api/stats", (req, res) => {
+    res.json({ ...cachedStats, running: batchState.running, ready: statsReady });
 });
 
 // API: Get influencers (paginated + search + filter)
