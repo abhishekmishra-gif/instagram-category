@@ -126,17 +126,16 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
 
   try {
 
-    // 1. Fault Tolerance: Find all influencer IDs that are currently in an active queue
-    const activeJobs = await db
+    // 1. Fault Tolerance: Find all influencer IDs that are in ANY batch job (active or completed)
+    const allBatchJobs = await db
       .collection(BATCH_JOBS_COLLECTION)
-      .find({ status: { $in: ["in_queue", "validating", "in_progress", "finalizing"] } })
+      .find({ status: { $in: ["in_queue", "validating", "in_progress", "finalizing", "completed"] } })
       .toArray();
 
-    let lockedInfluencerIds = [];
-    activeJobs.forEach((job) => {
+    let allBatchedInfluencerIds = [];
+    allBatchJobs.forEach((job) => {
       if (job.influencer_ids) {
-        // job.influencer_ids are stored as strings
-        lockedInfluencerIds.push(
+        allBatchedInfluencerIds.push(
           ...job.influencer_ids.map((id) => new ObjectId(id)),
         );
       }
@@ -152,8 +151,7 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
       const candidates = await db
         .collection(INFLUENCER_COLLECTION)
         .find({
-          "instagram.cost": { $exists: false },
-          _id: { $nin: [...lockedInfluencerIds, ...allSkippedIds, ...validIds] },
+          _id: { $nin: [...allBatchedInfluencerIds, ...allSkippedIds, ...validIds] },
           "instagram.follower_count_actual": { $gte: 1000 },
           "instagram.media_count": { $gte: 10 },
           "instagram.is_private": false,
@@ -193,21 +191,6 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
 
       // If we didn't find any new valid ones in this batch, stop to avoid infinite loop
       if (candidates.length < (totalLimit - validInfluencers.length + 20)) break;
-    }
-
-    // Mark all skipped influencers as processed (no posts / no data)
-    if (allSkippedIds.length > 0) {
-      const skipBulkOps = allSkippedIds.map(id => ({
-        updateOne: {
-          filter: { _id: id },
-          update: {
-            $set: {
-              "instagram.cost": 0,
-            },
-          },
-        },
-      }));
-      await db.collection(INFLUENCER_COLLECTION).bulkWrite(skipBulkOps);
     }
 
     // 3. Early Exit
@@ -306,18 +289,18 @@ async function rerunFailedBatch(batchId) {
       .toArray();
 
     if (influencers.length === 0) {
-       throw new Error("Could not find any of the original influencers in the database.");
+      throw new Error("Could not find any of the original influencers in the database.");
     }
 
     // Clear any existing AI category data the old batch might have temporarily set
     await db.collection(INFLUENCER_COLLECTION).updateMany(
       { _id: { $in: objectIds } },
-      { $unset: { "instagram.category": "", "instagram.categories": "", "instagram.cost": "" } }
+      { $unset: { "instagram.category": "", "instagram.categories": "" } }
     );
 
     const chunk = influencers; // We assume the old batch was a chunk already
 
-    
+
     const jsonlPath = path.join(
       __dirname,
       `batch_rerun_${Date.now()}.jsonl`,
@@ -347,21 +330,6 @@ async function rerunFailedBatch(batchId) {
         continue;
       }
       batchLines.push(JSON.stringify(requestLine));
-    }
-
-    // Save null category for skipped influencers
-    if (skippedIds.length > 0) {
-      const skipBulkOps = skippedIds.map(id => ({
-        updateOne: {
-          filter: { _id: id },
-          update: {
-            $set: {
-                "instagram.cost": 0,
-              },
-          },
-        },
-      }));
-      await db.collection(INFLUENCER_COLLECTION).bulkWrite(skipBulkOps);
     }
 
     if (batchLines.length === 0) {
@@ -433,31 +401,24 @@ async function syncOpenAIBatches() {
     for (const job of activeBatches) {
       // Check if all influencers were individually Instant-processed
       if (job.instant_processed_ids && job.influencer_ids &&
-          job.instant_processed_ids.length >= job.influencer_ids.length) {
-        const objectIds = job.influencer_ids.map(id => new ObjectId(id));
-        // Aggregate cost and tokens from influencers
-        const costAgg = await db.collection(INFLUENCER_COLLECTION).aggregate([
-          { $match: { _id: { $in: objectIds }, "instagram.cost": { $exists: true } } },
-          { $group: {
-            _id: null,
-            totalCost: { $sum: "$instagram.cost" },
-            totalInputTokens: { $sum: "$instagram.ai_tokens.input" },
-            totalOutputTokens: { $sum: "$instagram.ai_tokens.output" },
-          }},
-        ]).toArray();
-        const totals = costAgg[0] || { totalCost: 0, totalInputTokens: 0, totalOutputTokens: 0 };
+        job.instant_processed_ids.length >= job.influencer_ids.length) {
+        // Cost is tracked on the batch job itself via content[]
+        const totalCost = (job.content || []).reduce((sum, c) => sum + (c.cost || 0), 0);
+        const totalTokens = (job.content || []).reduce((sum, c) => sum + ((c.tokens?.input || 0) + (c.tokens?.output || 0)), 0);
 
         await db.collection(BATCH_JOBS_COLLECTION).updateOne(
           { _id: job._id },
-          { $set: {
-            status: "completed",
-            completed_at: new Date(),
-            manually_completed: true,
-            progress: 100,
-            cost: parseFloat(totals.totalCost.toFixed(5)),
-            tokens: (totals.totalInputTokens || 0) + (totals.totalOutputTokens || 0),
-            error: null,
-          }}
+          {
+            $set: {
+              status: "completed",
+              completed_at: new Date(),
+              manually_completed: true,
+              progress: 100,
+              cost: parseFloat(totalCost.toFixed(5)),
+              tokens: totalTokens,
+              error: null,
+            }
+          }
         );
         continue; // Skip OpenAI sync for this batch
       }
@@ -572,7 +533,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
         batchTotalTokens += inputTokensForResult + outputTokensForResult;
         batchTotalCost += costForResult;
 
-        // Increment ai_attempts — after 3 failed attempts, mark as permanently done
+        // Increment ai_attempts — after 3 failed attempts, mark as permanently done with null category
         const infDoc = await db.collection(INFLUENCER_COLLECTION).findOneAndUpdate(
           { _id: new ObjectId(influencerId) },
           { $inc: { "instagram.ai_attempts": 1 } },
@@ -582,7 +543,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
         if (attempts >= 3) {
           await db.collection(INFLUENCER_COLLECTION).updateOne(
             { _id: new ObjectId(influencerId) },
-            { $set: { "instagram.cost": 0 } }
+            { $set: { "instagram.category": null } }
           );
         }
         continue;
@@ -598,22 +559,26 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
       batchTotalTokens += inputTokens + outputTokens;
       batchTotalCost += cost;
 
+      // Skip if already processed via Instant ⚡ (check batch job's instant_processed_ids)
+      const instantIds = jobMeta.instant_processed_ids || [];
+      if (instantIds.includes(influencerId)) {
+        continue;
+      }
+
       bulkOps.push({
         updateOne: {
           filter: {
             _id: new ObjectId(influencerId),
-            "instagram.cost": { $exists: false }, // Don't overwrite if already processed (e.g. via Instant)
           },
           update: {
             $set: {
               "categories": Array.isArray(parsed.sub_categories) && parsed.sub_categories.length > 0
-  ? [parsed.sub_categories[0]]
-  : [],
+                ? [parsed.sub_categories[0]]
+                : [],
               "primary_category": parsed.category,
-              "secondary_categories" :  parsed.sub_categories || [],
+              "secondary_categories": parsed.sub_categories || [],
               "instagram.category": parsed.category,
               "instagram.categories": parsed.sub_categories || [],
-              "instagram.cost": parseFloat(cost.toFixed(5)),
             },
           },
         },
@@ -748,14 +713,30 @@ async function runContinuousBatchLoop() {
           console.error("[Orchestrator] Quiet sync error:", err),
         );
 
-        // Verify if there is genuinely anything left to do in the DB at all (locked or unlocked)
-        const remainingTotal = await db
-          .collection(INFLUENCER_COLLECTION)
-          .countDocuments({
-            "instagram.cost": { $exists: false },
-          });
+        // Verify if there is genuinely anything left to do — eligible minus already batched
+        const allJobs = await db.collection(BATCH_JOBS_COLLECTION)
+          .find({}).project({ influencer_ids: 1 }).toArray();
+        const allBatchedIds = new Set();
+        allJobs.forEach(j => (j.influencer_ids || []).forEach(id => allBatchedIds.add(id.toString())));
 
-        if (remainingTotal === 0) {
+        // Count eligible influencers not yet in any batch job
+        const allBatchedObjectIds = [...allBatchedIds]
+          .filter(id => /^[0-9a-fA-F]{24}$/.test(id))
+          .map(id => new ObjectId(id));
+
+        // Use a simple check: try to find at least 1 eligible candidate not in batch jobs
+        const remainingCandidate = await db.collection(INFLUENCER_COLLECTION).findOne({
+          _id: { $nin: allBatchedObjectIds },
+          "instagram.follower_count_actual": { $gte: 1000 },
+          "instagram.media_count": { $gte: 10 },
+          "instagram.is_private": false,
+          $or: [
+            { "instagram.ai_attempts": { $exists: false } },
+            { "instagram.ai_attempts": { $lt: 3 } }
+          ]
+        });
+
+        if (!remainingCandidate) {
           orchestratorState.isRunning = false;
           break;
         }
@@ -796,7 +777,7 @@ async function runContinuousBatchLoop() {
               orchestratorState.timing.lastId = lastJob.batch_id || null;
             }
           }
-          
+
           // Persist state after each successful batch
           await saveSessionState();
 
@@ -832,7 +813,7 @@ async function runContinuousBatchLoop() {
     orchestratorState.isRunning = false;
   }
 
-  
+
   await saveSessionState();
 }
 
@@ -909,11 +890,12 @@ async function getResumePreview() {
   });
   const allObjectIds = [...allIdStrings].map(id => new ObjectId(id));
 
-  // Count how many already have a category
-  const processedCount = await db.collection(INFLUENCER_COLLECTION).countDocuments({
-    _id: { $in: allObjectIds },
-    "instagram.category": { $exists: true, $ne: null }
-  });
+  // Count how many are in completed batch jobs (processed via openai_batch_jobs)
+  const completedJobs = await db.collection(BATCH_JOBS_COLLECTION)
+    .find({ status: "completed" }).project({ influencer_ids: 1 }).toArray();
+  const completedIdSet = new Set();
+  completedJobs.forEach(j => (j.influencer_ids || []).forEach(id => completedIdSet.add(id)));
+  const processedCount = [...allIdStrings].filter(id => completedIdSet.has(id)).length;
 
   const totalInfluencers = allIdStrings.size;
   const unprocessed = totalInfluencers - processedCount;
@@ -956,15 +938,17 @@ async function resumeCancelledBatches() {
 
   const allObjectIds = [...allIdStrings].map(id => new ObjectId(id));
 
-  // Find only those who still DON'T have a category
-  const unprocessed = await db.collection(INFLUENCER_COLLECTION).find({
-    _id: { $in: allObjectIds },
-    $or: [
-      { "instagram.cost": { $exists: false } },
-      { "instagram.category": null },
-      { "instagram.category": { $exists: false } }
-    ]
-  }).toArray();
+  // Find influencers not in any completed batch job (unprocessed)
+  const completedJobsForResume = await db.collection(BATCH_JOBS_COLLECTION)
+    .find({ status: "completed" }).project({ influencer_ids: 1 }).toArray();
+  const completedIdSetForResume = new Set();
+  completedJobsForResume.forEach(j => (j.influencer_ids || []).forEach(id => completedIdSetForResume.add(id)));
+  const unprocessedIds = [...allIdStrings].filter(id => !completedIdSetForResume.has(id));
+  const unprocessedObjectIds = unprocessedIds.map(id => new ObjectId(id));
+
+  const unprocessed = unprocessedObjectIds.length > 0
+    ? await db.collection(INFLUENCER_COLLECTION).find({ _id: { $in: unprocessedObjectIds } }).toArray()
+    : [];
 
   if (unprocessed.length === 0) {
     // Mark cancelled jobs so they aren't picked up again
@@ -1003,21 +987,6 @@ async function resumeCancelledBatches() {
           continue;
         }
         batchLines.push(JSON.stringify(requestLine));
-      }
-
-      // Save null category for skipped influencers
-      if (skippedIds.length > 0) {
-        const skipBulkOps = skippedIds.map(id => ({
-          updateOne: {
-            filter: { _id: id },
-            update: {
-              $set: {
-                "instagram.cost": 0,
-              },
-            },
-          },
-        }));
-        await db.collection(INFLUENCER_COLLECTION).bulkWrite(skipBulkOps);
       }
 
       if (batchLines.length === 0) {

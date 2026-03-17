@@ -111,7 +111,6 @@ async function runBatchJob() {
                                 $set: {
                                     "instagram.category": result.category,
                                     "instagram.categories": result.subCategories,
-                                    "instagram.cost": result.cost,
                                 },
                             }
                         );

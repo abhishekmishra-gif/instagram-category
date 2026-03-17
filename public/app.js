@@ -336,9 +336,7 @@ async function showBatchDetails(batchId) {
 
       const catHtml = inf.category
         ? `<span class="badge badge-success">${inf.category}</span>`
-        : inf.cost > 0
-          ? `<span class="badge badge-warning">NO MATCH</span>`
-          : `<span class="badge badge-pending">PENDING</span>`;
+        : `<span class="badge badge-pending">PENDING</span>`;
 
       const subCatHtml = (inf.subCategories || [])
         .map(sc => `<span class="badge badge-sm" style="background: var(--divider); color: var(--text-secondary); margin-top: 4px; display: inline-block;">${sc}</span>`)
@@ -412,7 +410,7 @@ async function analyzeInstant(influencerId, btn, batchId) {
         .join(" ");
 
       catCell.innerHTML = `${catHtml}<div style="margin-top: 4px;">${subCatHtml}</div>`;
-      costCell.innerHTML = `<span class="td-cost">$${data.result.cost.toFixed(4)}</span>`;
+      if (costCell && data.result.cost) costCell.innerHTML = `<span class="td-cost">$${data.result.cost.toFixed(4)}</span>`;
     }
 
     if (data.batchCompleted) {
