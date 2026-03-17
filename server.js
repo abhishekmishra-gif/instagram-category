@@ -154,7 +154,7 @@ async function refreshStats() {
 
         const withCategory = await chunkedCount(
             db.collection(INFLUENCER_COLLECTION),
-            { ...eligibilityFilter, "instagram.category": { $ne: null, $exists: true } },
+            { ...eligibilityFilter, "instagram.category": { $exists: true } },
             processedObjectIds
         );
 

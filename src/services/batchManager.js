@@ -577,7 +577,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
                 : [],
               "primary_category": parsed.category,
               "secondary_categories": parsed.sub_categories || [],
-              "instagram.category": parsed.category,
+              "instagram.category": parsed.category ?? parsed.sub_categories[0],
               "instagram.categories": parsed.sub_categories || [],
             },
           },
