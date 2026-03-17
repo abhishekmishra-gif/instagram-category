@@ -133,40 +133,29 @@ let statsReady = false;
 
 async function refreshStats() {
     try {
-        const objectIdsWithPosts = [...cachedIdsWithPosts]
+        const eligibilityFilter = {
+            "instagram.follower_count_actual": { $gte: 1000 },
+            "instagram.media_count": { $gte: 10 },
+            "instagram.is_private": false,
+        };
+
+        const total = await db.collection(INFLUENCER_COLLECTION).countDocuments(eligibilityFilter);
+
+        // Processed = eligible influencers that are in any batch job
+        const processedObjectIds = [...cachedProcessedIds]
             .filter(id => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id))
             .map(id => new ObjectId(id));
 
-        const total = await chunkedCount(
-            db.collection(INFLUENCER_COLLECTION),
-            {
-                "instagram.follower_count_actual": { $gte: 1000 },
-                "instagram.media_count": { $gte: 10 },
-                "instagram.is_private": false,
-            },
-            objectIdsWithPosts
-        );
-
-        const processedIds = objectIdsWithPosts.filter(id => cachedProcessedIds.has(id.toString()));
         const processed = await chunkedCount(
             db.collection(INFLUENCER_COLLECTION),
-            {
-                "instagram.follower_count_actual": { $gte: 1000 },
-                "instagram.media_count": { $gte: 10 },
-                "instagram.is_private": false,
-            },
-            processedIds
+            eligibilityFilter,
+            processedObjectIds
         );
 
         const withCategory = await chunkedCount(
             db.collection(INFLUENCER_COLLECTION),
-            {
-                "instagram.follower_count_actual": { $gte: 1000 },
-                "instagram.media_count": { $gte: 10 },
-                "instagram.is_private": false,
-                "instagram.category": { $ne: null, $exists: true },
-            },
-            processedIds
+            { ...eligibilityFilter, "instagram.category": { $ne: null, $exists: true } },
+            processedObjectIds
         );
 
         const noCategory = processed - withCategory;
