@@ -572,9 +572,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
           },
           update: {
             $set: {
-              "categories": Array.isArray(parsed.sub_categories) && parsed.sub_categories.length > 0
-                ? [parsed.sub_categories[0]]
-                : [],
+              "categories": [parsed.category],
               "primary_category": parsed.category,
               "secondary_categories": parsed.sub_categories || [],
               "instagram.category": parsed.category ?? parsed.sub_categories[0],
