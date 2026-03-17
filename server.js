@@ -607,22 +607,20 @@ app.get("/api/openai-batch/session/status", async (req, res) => {
             }
         }
 
-        // Use cached IDs of influencers that have posts (refreshed every 60s)
         // Exclude both active (in-progress) AND already-processed (completed) influencer IDs
-        const activeIdSet = new Set(activeInfluencerIds.map(id => id.toString()));
-        const eligibleIdsWithPosts = [...cachedIdsWithPosts]
-            .filter(id => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id) && !activeIdSet.has(id) && !cachedProcessedIds.has(id))
-            .map(id => new ObjectId(id));
+        const allExcludedIds = [
+            ...activeInfluencerIds,
+            ...[...cachedProcessedIds]
+                .filter(id => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id))
+                .map(id => new ObjectId(id))
+        ];
 
-        const count = await chunkedCount(
-            db.collection(INFLUENCER_COLLECTION),
-            {
-                "instagram.follower_count_actual": { $gte: 1000 },
-                "instagram.media_count": { $gte: 10 },
-                "instagram.is_private": false
-            },
-            eligibleIdsWithPosts
-        );
+        const count = await db.collection(INFLUENCER_COLLECTION).countDocuments({
+            "instagram.follower_count_actual": { $gte: 1000 },
+            "instagram.media_count": { $gte: 10 },
+            "instagram.is_private": false,
+            ...(allExcludedIds.length > 0 ? { _id: { $nin: allExcludedIds } } : {})
+        });
 
 
 
