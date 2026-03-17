@@ -758,11 +758,19 @@ function initEventListeners() {
 function init() {
   initTheme();
   initEventListeners();
-  loadStats();
-  fetchJobs(1);
-  pollSessionStatus();
 
-  // Background sync every 15 seconds
+  // Show loading overlay for 5 seconds
+  const loader = document.getElementById("dashboardLoader");
+  if (loader) loader.style.display = "flex";
+
+  setTimeout(() => {
+    if (loader) loader.style.display = "none";
+    loadStats();
+    fetchJobs(1);
+    pollSessionStatus();
+  }, 5000);
+
+  // Background sync every 30 seconds
   setInterval(async () => {
     fetch("/api/openai-batch/sync", { method: "POST" })
       .then(() => {
@@ -771,7 +779,7 @@ function init() {
         loadStats();
       })
       .catch(console.error);
-  }, 15000);
+  }, 30000);
 }
 
 init();
