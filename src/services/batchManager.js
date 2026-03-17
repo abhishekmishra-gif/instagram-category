@@ -792,9 +792,23 @@ async function runContinuousBatchLoop() {
         }
 
         if (orchestratorState.isRunning) {
-          // Wait for a short interval before polling the queue again and topping it off
+          // Dynamic throttling: scale delay based on in-progress influencer count
+          const activeJobs = await db.collection(BATCH_JOBS_COLLECTION)
+            .find({ status: { $in: ["validating", "in_progress", "finalizing", "in_queue"] } })
+            .project({ influencer_ids: 1 })
+            .toArray();
+          const inProgressCount = activeJobs.reduce((sum, j) => sum + (j.influencer_ids?.length || 0), 0);
+
+          let dynamicDelay = orchestratorState.delayMs; // 10s baseline
+          if (inProgressCount >= 5000) dynamicDelay = 120000;       // 2 min
+          else if (inProgressCount >= 2000) dynamicDelay = 60000;   // 1 min
+          else if (inProgressCount >= 500) dynamicDelay = 30000;    // 30s
+          // else 10s baseline
+
+          console.log(`[Orchestrator] In-progress: ${inProgressCount} influencers → delay: ${dynamicDelay / 1000}s`);
+
           await new Promise((resolve) =>
-            setTimeout(resolve, orchestratorState.delayMs),
+            setTimeout(resolve, dynamicDelay),
           );
         }
       } catch (err) {
