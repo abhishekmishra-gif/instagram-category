@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Influencer Category Dashboard — AI-powered batch categorization of influencers via OpenAI" />
+    <title>Influencer Category Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1>🏷️ Influencer Category Dashboard</h1>
+        <span class="badge" id="statusBadge">Idle</span>
+      </div>
+      <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">
+        🌙 <span id="themeLabel">Dark</span>
+      </button>
+    </header>
+
+    <!-- Hero Progress Bar -->
+    <div class="hero-progress-wrap" id="heroProgress">
+      <div class="hero-progress-bar">
+        <div class="hero-progress-fill" id="heroProgressFill" style="width: 0%;"></div>
+      </div>
+      <span class="hero-progress-text" id="heroProgressText">0% categorized</span>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-top">
+          <span class="stat-label">Total Influencers</span>
+          <div class="stat-icon total">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+        </div>
+        <span class="stat-value" id="statTotal">—</span>
+        <span class="stat-trend neutral" id="statTotalSub">Total in database</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top">
+          <span class="stat-label">Processed</span>
+          <div class="stat-icon success">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+          </div>
+        </div>
+        <span class="stat-value" id="statProcessed">—</span>
+        <span class="stat-trend up" id="statProcessedSub">Analyzed so far</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top">
+          <span class="stat-label">With Category</span>
+          <div class="stat-icon category">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+          </div>
+        </div>
+        <span class="stat-value" id="statWithCategory">—</span>
+        <span class="stat-trend up" id="statCategorySub">Successfully categorized</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top">
+          <span class="stat-label">Disqualified</span>
+          <div class="stat-icon nocategory">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+          </div>
+        </div>
+        <span class="stat-value" id="statNoCategory">—</span>
+        <span class="stat-trend neutral" id="statNoCategorySub">Returned null</span>
+      </div>
+      <div class="stat-card">
+        <div class="stat-top">
+          <span class="stat-label">Total OpenAI Cost</span>
+          <div class="stat-icon cost">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+        </div>
+        <span class="stat-value" id="statPriceSpent">—</span>
+        <span class="stat-trend neutral" id="statCostSub">Cost per influencer: —</span>
+      </div>
+    </div>
+
+    <!-- Modal for batch details -->
+    <div id="batchDetailsModal" class="modal-overlay" role="dialog" aria-modal="true" aria-label="Batch Details">
+      <div class="modal-card modal-card--md" style="max-height: 85vh;">
+        <div class="modal-header">
+          <h3>Batch Details <span id="detailBatchId" class="batch-id" style="font-family: var(--font-mono); font-size: var(--text-base); font-weight: 500; color: var(--text-secondary); margin-left: var(--space-sm);"></span></h3>
+          <div class="modal-header-actions">
+            <button id="btnBatchTime" class="btn btn-ghost btn-sm" aria-label="Time Stats" title="Time Stats">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </button>
+            <button id="btnCloseDetails" class="btn btn-outline btn-sm" aria-label="Close">✕</button>
+          </div>
+        </div>
+
+        <!-- Time Stats Panel (toggled) -->
+        <div id="batchTimePanel" class="batch-time-panel" style="display: none;">
+          <div class="batch-time-grid">
+            <div class="batch-time-cell">
+              <span class="batch-time-label">Created</span>
+              <strong class="batch-time-value" id="batchTimeCreated">—</strong>
+            </div>
+            <div class="batch-time-cell">
+              <span class="batch-time-label">Completed</span>
+              <strong class="batch-time-value" id="batchTimeCompleted">—</strong>
+            </div>
+            <div class="batch-time-cell">
+              <span class="batch-time-label">Duration</span>
+              <strong class="batch-time-value mono" id="batchTimeDuration">—</strong>
+            </div>
+            <div class="batch-time-cell">
+              <span class="batch-time-label">Speed</span>
+              <strong class="batch-time-value mono" id="batchTimeSpeed">—</strong>
+            </div>
+          </div>
+        </div>
+
+        <div id="detailsLoading" class="modal-loading">
+          <span>⏳ Fetching influencers...</span>
+        </div>
+
+        <div id="detailsContent" class="modal-body" style="display: none;">
+          <table class="details-table">
+            <thead>
+              <tr>
+                <th>Influencer</th>
+                <th>Category</th>
+                <th>Cost</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="detailsTbody">
+              <!-- Loaded dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmModal" class="modal-overlay" role="dialog" aria-modal="true" aria-label="Confirm Action">
+      <div class="modal-card modal-card--sm">
+        <div class="modal-body--center">
+          <div id="confirmIcon" class="confirm-icon">❓</div>
+          <div>
+            <h3 id="confirmTitle" class="confirm-title">Confirm Action</h3>
+            <p id="confirmMessage" class="confirm-message">Are you sure you want to proceed?</p>
+          </div>
+          <div class="confirm-actions">
+            <button id="btnConfirmNo" class="confirm-btn confirm-btn--cancel">No</button>
+            <button id="btnConfirmYes" class="confirm-btn confirm-btn--ok">Yes</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Command Center -->
+    <div class="command-center">
+      <!-- Card 1: Bulk Processing Controls -->
+      <div class="stat-card command-card-left">
+        <div class="command-header">
+          <div class="command-title-group">
+            <div class="command-icon-wrap">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div>
+              <h3 class="command-title">Bulk Processing</h3>
+              <p class="command-desc">Automatically categorize influencers using AI</p>
+            </div>
+          </div>
+          <div class="command-actions">
+            <button id="btnResume" class="btn btn-ghost btn-ghost--success">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+              Resume
+            </button>
+            <button id="btnCancelAll" class="btn btn-ghost btn-ghost--danger">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              Cancel All
+            </button>
+            <button id="btnSync" class="btn btn-ghost">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        <div id="sessionProgress" class="cmd-status-block" style="display: none;">
+          <div class="cmd-status-top">
+            <div class="cmd-status-left">
+              <span class="status-chip-dot" id="statusDot"></span>
+              <strong id="sessionStatusText">Processing</strong>
+              <svg id="statusSpinner" class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+              <span class="cmd-status-sep">|</span>
+              <span class="status-metric"><strong id="sessionQueuedText">0</strong> queued</span>
+              <span class="cmd-status-dot-sep">·</span>
+              <span class="status-metric"><strong id="sessionPendingText">0</strong> awaiting</span>
+            </div>
+            <span class="cmd-status-pct" id="sessionPct">0%</span>
+          </div>
+          <div class="cmd-progress-track">
+            <div class="cmd-progress-fill" id="sessionProgressFill" style="width: 0%;"></div>
+          </div>
+        </div>
+
+        <div class="command-controls-section">
+          <div class="command-controls-row">
+            <div class="input-stack">
+              <label class="input-stack-label">Influencers per round</label>
+              <input type="number" class="input-stack-field" id="batchTotalDocs" value="10" min="1" />
+            </div>
+            <div class="input-stack">
+              <label class="input-stack-label">Batch size <span class="info-tip" data-tooltip="Max influencers per OpenAI batch"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></label>
+              <input type="number" class="input-stack-field" id="batchChunkSize" value="10" min="1" />
+            </div>
+            <div class="input-stack input-stack--action">
+              <label class="input-stack-label">&nbsp;</label>
+              <button class="btn btn-primary btn-start" id="btnConfirmStart">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Start Session
+              </button>
+              <button class="btn btn-dark btn-start" id="btnStopSession" style="display: none;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>
+                Pause Session
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Session Stats -->
+      <div class="stat-card command-card-right">
+        <div class="command-right-header">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>Session Stats</span>
+        </div>
+        <div class="ss-grid">
+          <div class="ss-cell">
+            <span class="ss-cell-label">Started</span>
+            <strong class="ss-cell-value" id="timingStarted">—</strong>
+          </div>
+          <div class="ss-cell">
+            <span class="ss-cell-label">Updated</span>
+            <strong class="ss-cell-value" id="timingUpdated">—</strong>
+          </div>
+          <div class="ss-cell">
+            <span class="ss-cell-label">Elapsed</span>
+            <strong class="ss-cell-value mono" id="timingElapsed">0h 0m</strong>
+          </div>
+          <div class="ss-cell">
+            <span class="ss-cell-label">Speed</span>
+            <strong class="ss-cell-value mono" id="timingRate">0.0/sec</strong>
+          </div>
+          <div class="ss-cell ss-cell--full">
+            <span class="ss-cell-label">Latest Batch</span>
+            <strong class="ss-cell-value mono link" id="timingLastId" title="Click to copy" data-full-id="">—</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="table-container">
+      <div class="table-header-bar">
+        <div class="table-header-left">
+          <div class="table-icon-wrap">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+              <line x1="8" y1="21" x2="16" y2="21"></line>
+              <line x1="12" y1="17" x2="12" y2="21"></line>
+            </svg>
+          </div>
+          <div>
+            <h3 class="table-title">Batch Jobs <span class="table-count" id="tableJobCount">0</span></h3>
+            <p class="table-subtitle">Real-time sync with OpenAI Batch API</p>
+          </div>
+        </div>
+        <div class="table-filters">
+          <div class="search-wrap">
+            <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            <input type="text" id="batchSearch" class="table-search" placeholder="Search batch ID..." />
+          </div>
+          <div class="custom-select" id="batchStatusFilterWrap">
+            <button class="custom-select-trigger" id="filterTrigger" type="button">
+              <svg class="filter-trigger-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+              <span id="filterLabel">All Status</span>
+              <svg class="custom-select-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+            <div class="custom-select-menu" id="filterMenu">
+              <div class="custom-select-option active" data-value="all">
+                <span class="option-dot" style="background: var(--text-secondary);"></span>
+                All Status
+              </div>
+              <div class="custom-select-option" data-value="validating">
+                <span class="option-dot" style="background: var(--color-warning);"></span>
+                Validating
+              </div>
+              <div class="custom-select-option" data-value="in_progress">
+                <span class="option-dot" style="background: var(--color-primary);"></span>
+                In Progress
+              </div>
+              <div class="custom-select-option" data-value="finalizing">
+                <span class="option-dot" style="background: #af52de;"></span>
+                Finalizing
+              </div>
+              <div class="custom-select-option" data-value="completed">
+                <span class="option-dot" style="background: var(--color-success);"></span>
+                Completed
+              </div>
+              <div class="custom-select-option" data-value="failed">
+                <span class="option-dot" style="background: var(--color-error);"></span>
+                Failed
+              </div>
+              <div class="custom-select-option" data-value="expired">
+                <span class="option-dot" style="background: #8e8e93;"></span>
+                Expired
+              </div>
+              <div class="custom-select-option" data-value="cancelled">
+                <span class="option-dot" style="background: #636366;"></span>
+                Cancelled
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Batch ID</th>
+            <th>Influencers</th>
+            <th>Progress</th>
+            <th>Tokens</th>
+            <th>Cost</th>
+            <th>Created</th>
+            <th>Error</th>
+            <th style="width: 80px; text-align: center;">Action</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody">
+          <tr>
+            <td colspan="9" class="loading-row">Loading OpenAI Jobs...</td>
+          </tr>
+        </tbody>
+      </table>
+      <!-- Batch Jobs Pagination -->
+      <div id="batchPagination" class="pagination" style="display: none;">
+        <button id="btnPrevBatch" class="btn btn-outline">Previous</button>
+        <span id="batchPageInfo" class="page-info">Page 1 of 1</span>
+        <button id="btnNextBatch" class="btn btn-outline">Next</button>
+      </div>
+    </div>
+
+    <!-- Resume Preview Modal -->
+    <div id="resumeModal" class="modal-overlay">
+      <div class="modal-card" style="max-width: 560px;">
+        <div class="modal-header">
+          <h3>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-success)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+            Resume Cancelled Batches
+          </h3>
+          <button class="modal-close" onclick="$('resumeModal').classList.remove('active')">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="resumePreviewLoading" style="text-align: center; padding: 24px; color: var(--text-secondary);">Loading preview...</div>
+          <div id="resumePreviewContent" style="display: none;">
+            <div class="resume-summary-grid">
+              <div class="resume-stat">
+                <span class="resume-stat-label">Cancelled Batches</span>
+                <span class="resume-stat-value" id="rpCancelledCount">0</span>
+              </div>
+              <div class="resume-stat">
+                <span class="resume-stat-label">Total Influencers</span>
+                <span class="resume-stat-value" id="rpTotalCount">0</span>
+              </div>
+              <div class="resume-stat resume-stat--done">
+                <span class="resume-stat-label">Already Processed <span class="info-tip" data-tooltip="Influencers who received their AI category before the batch was cancelled. These will be skipped during resume."><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></span></span>
+                <span class="resume-stat-value" id="rpProcessedCount">0</span>
+              </div>
+              <div class="resume-stat resume-stat--pending">
+                <span class="resume-stat-label">Will be Resumed</span>
+                <span class="resume-stat-value" id="rpUnprocessedCount">0</span>
+              </div>
+            </div>
+            <div id="rpBatchList" class="resume-batch-list"></div>
+          </div>
+          <div id="resumePreviewEmpty" style="display: none; text-align: center; padding: 24px; color: var(--text-secondary);">
+            No cancelled batches to resume.
+          </div>
+        </div>
+        <div class="modal-footer" id="resumeModalFooter" style="display: none;">
+          <button class="btn btn-ghost" onclick="$('resumeModal').classList.remove('active')">Cancel</button>
+          <button id="btnConfirmResume" class="btn btn-primary">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+            Confirm Resume
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

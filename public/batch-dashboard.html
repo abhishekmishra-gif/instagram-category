@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>OpenAI Batch Jobs | SaaS Monitor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="batch-style.css" />
+</head>
+<body>
+    
+    <div class="topbar">
+        <div class="topbar-left">
+            <h1 class="brand">OPENAI BATCH JOBS</h1>
+            <div class="stats-ribbon">
+                <span class="stat-item">Total Jobs: <strong id="stat-total">0</strong></span>
+                <span class="stat-item completed">Completed: <strong id="stat-completed">0</strong></span>
+                <span class="stat-item progress">In Progress: <strong id="stat-progress">0</strong></span>
+                <span class="stat-item failed">Failed: <strong id="stat-failed">0</strong></span>
+                <span class="spacer"></span>
+                <span class="stat-item">Total Tokens: <strong id="stat-tokens">0</strong></span>
+                <span class="stat-item cost">Total Cost: <strong id="stat-cost">$0.00</strong></span>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <button id="btnNewBatch" class="btn btn-primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                Create New Batch
+            </button>
+            <button id="btnSync" class="btn btn-secondary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                Sync from OpenAI
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal for new batch -->
+    <div id="newBatchModal" class="modal">
+        <div class="modal-content">
+            <h3>Continuous Batch Session</h3>
+            <p>Start a long-running background process to safely trickle batches to OpenAI.</p>
+            
+            <div id="sessionProgress" style="display: none; padding: 15px; background: #f5f5f7; border-radius: 8px; margin-bottom: 20px;">
+                <div style="font-weight: 500; font-size: 14px; margin-bottom: 5px;">Active Session: <span id="sessionStatusText" style="color: #0066cc;">Running</span></div>
+                <div style="font-size: 13px; color: #86868b; margin-bottom: 3px;">Processed this session: <span id="sessionProcessedText">0</span></div>
+                <div style="font-size: 13px; color: #86868b;">Remaining in Database: <span id="sessionPendingText">Loading...</span></div>
+            </div>
+
+            <div class="form-group">
+                <label>Total Influencers to Process:</label>
+                <input type="number" id="batchTotalDocs" value="10" min="1">
+                <small>Amount to fetch from DB and process every 10 seconds.</small>
+            </div>
+            <div class="form-group">
+                <label>Number of influencer per batch:</label>
+                <input type="number" id="batchChunkSize" value="2" min="1">
+                <small>Max docs clustered into each single batch file.</small>
+            </div>
+            <div class="modal-actions">
+                <button id="btnCancel" class="btn btn-outline">Close</button>
+                <button id="btnStopSession" class="btn btn-secondary" style="display: none; color: #ff3b30; border-color: #ff3b30;">Stop Session</button>
+                <button id="btnConfirmStart" class="btn btn-primary">Start Session</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for batch details -->
+    <div id="batchDetailsModal" class="modal">
+        <div class="modal-content" style="width: 800px; max-height: 85vh; display: flex; flex-direction: column;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3>Batch Details <span id="detailBatchId" style="font-family: monospace; font-size: 14px; font-weight: 500; color: #86868b; margin-left: 8px;"></span></h3>
+                <button id="btnCloseDetails" class="btn btn-outline" style="padding: 4px 8px;">x</button>
+            </div>
+            
+            <div id="detailsLoading" style="text-align: center; padding: 40px; color: #86868b; display: none;">Fetching influencers...</div>
+            
+            <div id="detailsContent" style="overflow-y: auto; flex: 1;">
+                <table style="width: 100%; border-collapse: collapse; text-align: left;">
+                    <thead style="position: sticky; top: 0; background: #fff; z-index: 1;">
+                        <tr>
+                            <th style="padding: 12px; border-bottom: 2px solid #f2f2f7;">Influencer</th>
+                            <th style="padding: 12px; border-bottom: 2px solid #f2f2f7;">Category</th>
+                            <th style="padding: 12px; border-bottom: 2px solid #f2f2f7;">Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailsTbody">
+                        <!-- Loaded dynamically -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div class="table-card">
+            <div class="table-responsive">
+                <table id="batchTable">
+                    <thead>
+                        <tr>
+                            <th>STATUS</th>
+                            <th>BATCH ID</th>
+                            <th>DOCS</th>
+                            <th>PROGRESS</th>
+                            <th>TOKENS</th>
+                            <th>COST</th>
+                            <th>CREATED</th>
+                            <th>ERROR</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Rendered via JS -->
+                        <tr class="loading-row"><td colspan="8">Loading OpenAI Jobs...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="table-footer">
+                <span class="showing-text" id="showingText">Showing 0 jobs</span>
+                <div class="pagination">
+                    <button disabled>← Prev</button>
+                    <button disabled>Next →</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DOM = {
+            tbody: document.querySelector('#batchTable tbody'),
+            btnSync: document.getElementById('btnSync'),
+            btnNewBatch: document.getElementById('btnNewBatch'),
+            modal: document.getElementById('newBatchModal'),
+            btnCancel: document.getElementById('btnCancel'),
+            btnConfirm: document.getElementById('btnConfirmStart'),
+            inputLimit: document.getElementById('batchDocCount'),
+            showingText: document.getElementById('showingText'),
+            stats: {
+                total: document.getElementById('stat-total'),
+                completed: document.getElementById('stat-completed'),
+                progress: document.getElementById('stat-progress'),
+                failed: document.getElementById('stat-failed'),
+                tokens: document.getElementById('stat-tokens'),
+                cost: document.getElementById('stat-cost')
+            }
+        };
+
+        let currentJobs = [];
+
+        function formatDate(dateStr) {
+            if (!dateStr) return "—";
+            const d = new Date(dateStr);
+            const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+            return `${d.getDate()} ${months[d.getMonth()]}, ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+        }
+
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+
+        function getStatusBadge(status) {
+            const low = status.toLowerCase();
+            if (low === 'completed') return `<span class="badge badge-success">COMPLETED</span>`;
+            if (['failed', 'expired', 'cancelled'].includes(low)) return `<span class="badge badge-danger">${status.toUpperCase()}</span>`;
+            if (['validating', 'in_progress'].includes(low)) return `<span class="badge badge-progress">${status.toUpperCase()}</span>`;
+            return `<span class="badge badge-neutral">${status.toUpperCase()}</span>`;
+        }
+
+        function updateStats() {
+            let completed = 0, progress = 0, failed = 0;
+            let totalTokens = 0, totalCost = 0;
+
+            currentJobs.forEach(job => {
+                const stat = job.status.toLowerCase();
+                if (stat === 'completed') completed++;
+                else if (['failed', 'expired', 'cancelled'].includes(stat)) failed++;
+                else if (['in_progress', 'validating', 'finalizing'].includes(stat)) progress++;
+
+                totalTokens += job.tokens || 0;
+                totalCost += job.cost || 0;
+            });
+
+            DOM.stats.total.innerText = currentJobs.length;
+            DOM.stats.completed.innerText = completed;
+            DOM.stats.progress.innerText = progress;
+            DOM.stats.failed.innerText = failed;
+            DOM.stats.tokens.innerText = formatNumber(totalTokens);
+            DOM.stats.cost.innerText = `$${totalCost.toFixed(4)}`;
+            DOM.showingText.innerText = `Showing ${currentJobs.length} jobs`;
+        }
+
+        // Simplified logic for UI inputs
+        const elTotalDocs = document.getElementById('batchTotalDocs');
+        const elChunkSize = document.getElementById('batchChunkSize');
+
+        function renderTable() {
+            if (currentJobs.length === 0) {
+                DOM.tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: #86868b; padding: 40px;">No batch jobs found. Create one to get started.</td></tr>`;
+                return;
+            }
+
+            DOM.tbody.innerHTML = currentJobs.map(job => {
+                // Ensure cost is green visually
+                const costHtml = job.cost > 0 ? `<span style="color: #34c759; font-family: monospace; font-weight: 500;">$${job.cost.toFixed(4)}</span>` : "—";
+                
+                return `
+                    <tr class="clickable-row" onclick="showBatchDetails('${job.batch_id}')">
+                        <td>${getStatusBadge(job.status)}</td>
+                        <td class="cell-id">${job.batch_id || 'Generating...'}</td>
+                        <td class="cell-primary">${formatNumber(job.doc_count)}</td>
+                        <td>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" style="width: ${job.progress || 0}%"></div>
+                            </div>
+                            <span class="progress-text">${job.progress || 0}%</span>
+                        </td>
+                        <td class="cell-primary">${formatNumber(job.tokens || 0)}</td>
+                        <td>${costHtml}</td>
+                        <td class="cell-date">${formatDate(job.created_at)}</td>
+                        <td class="cell-error">${job.error || '—'}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        async function fetchJobs() {
+            try {
+                const res = await fetch("/api/openai-batch/list");
+                currentJobs = await res.json();
+                updateStats();
+                renderTable();
+            } catch (err) {
+                console.error(err);
+                alert("Failed to load generic batch jobs");
+            }
+        }
+
+        async function showBatchDetails(batchId) {
+            const modal = document.getElementById('batchDetailsModal');
+            document.getElementById('detailBatchId').innerText = batchId;
+            const tbody = document.getElementById('detailsTbody');
+            const loading = document.getElementById('detailsLoading');
+            const content = document.getElementById('detailsContent');
+
+            tbody.innerHTML = '';
+            loading.style.display = 'block';
+            content.style.display = 'none';
+            modal.classList.add('active');
+
+            try {
+                const res = await fetch(`/api/openai-batch/${batchId}/influencers`);
+                const influencers = await res.json();
+                
+                if (influencers.error) throw new Error(influencers.error);
+
+                tbody.innerHTML = influencers.map(inf => {
+                    const avatar = inf.avatar ? `<img src="${inf.avatar}" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover;">` : `<div style="width:32px; height:32px; border-radius:50%; background:#e5e5ea; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; color:#8e8e93">${inf.name[0]||'@'}</div>`;
+                    const catHtml = inf.category ? `<span class="badge badge-success">${inf.category}</span>` : `<span class="badge badge-neutral">PENDING</span>`;
+                    const costHtml = inf.cost > 0 ? `<span style="color: #34c759; font-family: monospace; font-weight: 500;">$${inf.cost.toFixed(4)}</span>` : "—";
+                    
+                    return `
+                        <tr>
+                            <td style="padding: 12px; border-bottom: 1px solid #f2f2f7;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    ${avatar}
+                                    <div style="display: flex; flex-direction: column;">
+                                        <span style="font-weight: 600; font-size: 14px; color: #1d1d1f;">${inf.name}</span>
+                                        <span style="font-size: 12px; color: #86868b;">@${inf.handle}</span>
+                                    </div>
+                                </div>
+                            </td>
+                            <td style="padding: 12px; border-bottom: 1px solid #f2f2f7;">${catHtml}</td>
+                            <td style="padding: 12px; border-bottom: 1px solid #f2f2f7;">${costHtml}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; padding: 20px; color: #ff3b30;">Error loading details</td></tr>`;
+            } finally {
+                loading.style.display = 'none';
+                content.style.display = 'block';
+            }
+        }
+
+        document.getElementById('btnCloseDetails').addEventListener('click', () => {
+            document.getElementById('batchDetailsModal').classList.remove('active');
+        });
+
+        // Button Listeners
+        DOM.btnSync.addEventListener('click', async () => {
+            const icon = DOM.btnSync.querySelector('svg');
+            icon.classList.add('spin');
+            try {
+                await fetch("/api/openai-batch/sync", { method: 'POST' });
+                await fetchJobs();
+            } catch (e) {
+                alert("Sync failed: " + e.message);
+            } finally {
+                icon.classList.remove('spin');
+            }
+        });
+
+        DOM.btnNewBatch.addEventListener('click', () => {
+            DOM.modal.classList.add('active');
+        });
+
+        DOM.btnCancel.addEventListener('click', () => {
+            DOM.modal.classList.remove('active');
+        });
+
+        // Session Controller Logic
+        const btnStopSession = document.getElementById('btnStopSession');
+        const sessionProgress = document.getElementById('sessionProgress');
+        const sessionProcessedText = document.getElementById('sessionProcessedText');
+        const sessionPendingText = document.getElementById('sessionPendingText');
+        const sessionStatusText = document.getElementById('sessionStatusText');
+
+        async function pollSessionStatus() {
+            try {
+                const res = await fetch("/api/openai-batch/session/status");
+                const state = await res.json();
+                
+                // We show progress panel if either running OR there are docs processed this session
+                if (state.isRunning || state.processedCount > 0) {
+                    sessionProgress.style.display = 'block';
+                    sessionProcessedText.innerText = state.processedCount || 0;
+                    sessionPendingText.innerText = state.pendingDBCount !== undefined ? state.pendingDBCount : "Loading...";
+                    
+                    if (state.isRunning) {
+                        sessionStatusText.innerText = "Running continuously...";
+                        sessionStatusText.style.color = "#0066cc";
+                        btnStopSession.style.display = 'inline-block';
+                        DOM.btnConfirm.style.display = 'none';
+                        elTotalDocs.disabled = true;
+                        elChunkSize.disabled = true;
+                    } else {
+                        sessionStatusText.innerText = state.pendingDBCount === 0 ? "Database Fully Processed!" : "Stopped";
+                        sessionStatusText.style.color = state.pendingDBCount === 0 ? "#34c759" : "#ff3b30";
+                        btnStopSession.style.display = 'none';
+                        DOM.btnConfirm.style.display = 'inline-block';
+                        elTotalDocs.disabled = false;
+                        elChunkSize.disabled = false;
+                    }
+                } else {
+                    sessionProgress.style.display = 'none';
+                    btnStopSession.style.display = 'none';
+                    DOM.btnConfirm.style.display = 'inline-block';
+                    elTotalDocs.disabled = false;
+                    elChunkSize.disabled = false;
+                }
+            } catch (e) {
+                console.error("Failed to poll session status:", e);
+            }
+        }
+
+        DOM.btnNewBatch.addEventListener('click', () => {
+            pollSessionStatus(); // Check immediate status when opening
+            DOM.modal.classList.add('active');
+        });
+
+        DOM.btnConfirm.addEventListener('click', async () => {
+            const limit = parseInt(elTotalDocs.value, 10);
+            const chunk = parseInt(elChunkSize.value, 10);
+            
+            if (!limit || limit < 1 || !chunk || chunk < 1) return alert("Enter valid counts");
+
+            DOM.btnConfirm.disabled = true;
+            DOM.btnConfirm.innerText = "Starting...";
+
+            try {
+                const res = await fetch("/api/openai-batch/session/start", {
+                    method: 'POST',
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ limit: limit, chunkSize: chunk })
+                });
+                
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                
+                await pollSessionStatus();
+            } catch (err) {
+                alert("Error: " + err.message);
+            } finally {
+                DOM.btnConfirm.disabled = false;
+                DOM.btnConfirm.innerText = "Start Session";
+            }
+        });
+
+        btnStopSession.addEventListener('click', async () => {
+            btnStopSession.disabled = true;
+            btnStopSession.innerText = "Stopping...";
+            try {
+                await fetch("/api/openai-batch/session/stop", { method: 'POST' });
+                await pollSessionStatus();
+            } catch (err) {
+                console.error(err);
+            } finally {
+                btnStopSession.disabled = false;
+                btnStopSession.innerText = "Stop Session";
+            }
+        });
+
+        // Initial load
+        fetchJobs();
+
+        // Auto poll every 15 seconds locally AND sync with OpenAI automatically
+        setInterval(async () => {
+            const icon = DOM.btnSync.querySelector('svg');
+            icon.classList.add('spin');
+            
+            try {
+                // Background quiet sync
+                await fetch("/api/openai-batch/sync", { method: 'POST' });
+                // Repopulate table silently
+                await fetchJobs();
+                // Also poll continuous session state
+                if (DOM.modal.classList.contains('active')) {
+                    await pollSessionStatus();
+                }
+            } catch (err) {
+                console.error("Auto-sync failed:", err);
+            } finally {
+                icon.classList.remove('spin');
+            }
+        }, 15000);
+        
+        // Fast-poll the UI state exclusively when modal is open
+        setInterval(() => {
+            if (DOM.modal.classList.contains('active')) {
+                pollSessionStatus();
+            }
+        }, 2000);
+    </script>
+</body>
+</html>
