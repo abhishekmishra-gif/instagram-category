@@ -32,7 +32,7 @@ RULES:
 4. Only raw JSON, no markdown.
 
 RESPOND IN THIS EXACT JSON FORMAT:
-{"category":"Category Name","sub_categories":["Sub 1","Sub 2"],"confidence":95,"reasoning":"Brief reason"}`;
+{"category":"Category Name","sub_categories":["Sub 1","Sub 2"]}`;
 
 const fallbackSystemPrompt = `You are an Instagram influencer category classifier. You have NO post content to analyze. Use ONLY the username, bio, and existing database categories to guess the BEST category.
 
