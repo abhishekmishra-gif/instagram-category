@@ -5,7 +5,7 @@ const { findCategories, printCategoryResult } = require("../src/services/categor
 // ============================================================
 // ⚡ CHANGE THIS ID TO FETCH A DIFFERENT INFLUENCER'S DATA
 // ============================================================
-const INFLUENCER_ID = "68808997ef505453fb080878";
+const INFLUENCER_ID = "673c4117005171b7340764d5";
 // ============================================================
 
 const MONGO_URI = process.env.MONGO_URI;

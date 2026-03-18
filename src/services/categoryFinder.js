@@ -57,27 +57,37 @@ async function findCategories(influencer, posts) {
         return await classifyFromFallback(fullname, username, bio, existingCategories, posts?.length || 0);
     }
 
-    const systemPrompt = `You are an expert Instagram influencer category classifier. Analyze the content and pick the single BEST category and ALL genuinely relevant sub-categories.
+    const systemPrompt = `You are an expert Instagram influencer category classifier. You will receive the influencer's IDENTITY (username, name, bio, existing database categories) and their recent POST CONTENT (captions + hashtags).
 
 CATEGORIES & THEIR SUB-CATEGORIES (pick ONLY from these):
 ${CATEGORY_PROMPT}
 
-RULES:
-1. Pick the MOST DOMINANT category across ALL 12 captions.
-2. Pick ALL sub-categories that genuinely match this influencer from the chosen category's list.
-3. Only include sub-categories with real evidence in the content.
-4. Only raw JSON, no markdown.
+CLASSIFICATION RULES:
+1. POST CONTENT is your PRIMARY evidence. Analyze all captions and hashtags to determine what the influencer actually does professionally.
+2. IGNORE paid/sponsored posts and brand collaborations (#ad, brand mentions, product promos) — these are advertisements, NOT identity signals. Celebrities endorse brands regardless of their actual profession.
+3. Give EXTRA WEIGHT to posts about: movie/film/song releases, professional achievements, awards, tournaments, career announcements, or creative work — these reveal the true profession.
+4. USERNAME and BIO are SECONDARY hints. If the username contains a clear profession keyword (e.g. "gaming", "chef", "fitness"), factor it in strongly.
+5. DATABASE CATEGORIES may be INCORRECT. Treat them as a reference only — always verify against post content. If posts clearly contradict the DB category, trust the posts.
+6. Do NOT confuse lifestyle/personal posts with the influencer's profession. A sports star posting family photos is still in Sports. An actress posting fashion photos is still in Entertainment.
+7. Pick ALL sub-categories that genuinely match from the chosen category's list.
+8. Only raw JSON, no markdown.
 
 RESPOND IN THIS EXACT JSON FORMAT:
 {"category":"Category Name","sub_categories":["Sub 1","Sub 2"],"confidence":95,"reasoning":"Brief reason"}`;
 
-    const userPrompt = `LAST 12 POST CAPTIONS:
+    const userPrompt = `INFLUENCER IDENTITY:
+Username: @${username}
+Name: ${fullname}
+Bio: ${bio || "None"}
+Database Categories: ${existingCategories || "None"}
+
+LAST 12 POST CAPTIONS:
 ${captions.join("\n\n")}
 
 ALL HASHTAGS USED:
 ${allHashtags.slice(0, 50).join(", ")}
 
-Analyze the above captions and hashtags ONLY. Return the JSON.`;
+Classify this influencer. Use IDENTITY first, then CONFIRM with post content. Return the JSON.`;
 
     // console.log("\n🤖 Sending data to OpenAI for category analysis...");
 

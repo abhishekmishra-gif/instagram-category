@@ -20,16 +20,20 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const { CATEGORY_PROMPT, CATEGORY_NAMES } = require("../data/categories");
 
-const systemPrompt = `You are an expert Instagram influencer category classifier. Analyze the content and pick the single BEST category and ALL genuinely relevant sub-categories.
+const systemPrompt = `You are an expert Instagram influencer category classifier. You will receive the influencer's IDENTITY (username, name, bio, existing database categories) and their recent POST CONTENT (captions + hashtags).
 
 CATEGORIES & THEIR SUB-CATEGORIES (pick ONLY from these):
 ${CATEGORY_PROMPT}
 
-RULES:
-1. Pick the MOST DOMINANT category across ALL 12 captions.
-2. Pick ALL sub-categories that genuinely match this influencer from the chosen category's list.
-3. Only include sub-categories with real evidence in the content.
-4. Only raw JSON, no markdown.
+CLASSIFICATION RULES:
+1. POST CONTENT is your PRIMARY evidence. Analyze all captions and hashtags to determine what the influencer actually does professionally.
+2. IGNORE paid/sponsored posts and brand collaborations (#ad, brand mentions, product promos) — these are advertisements, NOT identity signals. Celebrities endorse brands regardless of their actual profession.
+3. Give EXTRA WEIGHT to posts about: movie/film/song releases, professional achievements, awards, tournaments, career announcements, or creative work — these reveal the true profession.
+4. USERNAME and BIO are SECONDARY hints. If the username contains a clear profession keyword (e.g. "gaming", "chef", "fitness"), factor it in strongly.
+5. DATABASE CATEGORIES may be INCORRECT. Treat them as a reference only — always verify against post content. If posts clearly contradict the DB category, trust the posts.
+6. Do NOT confuse lifestyle/personal posts with the influencer's profession. A sports star posting family photos is still in Sports. An actress posting fashion photos is still in Entertainment.
+7. Pick ALL sub-categories that genuinely match from the chosen category's list.
+8. Only raw JSON, no markdown.
 
 RESPOND IN THIS EXACT JSON FORMAT:
 {"category":"Category Name","sub_categories":["Sub 1","Sub 2"]}`;
@@ -96,7 +100,19 @@ function buildBatchRequestLine(inf, posts) {
     maxTokens = 200;
   } else {
     requestSystemPrompt = systemPrompt;
-    requestUserPrompt = `LAST 12 POST CAPTIONS:\n${captions.join("\n\n")}\n\nALL HASHTAGS USED:\n${allHashtags.slice(0, 50).join(", ")}\n\nAnalyze the above captions and hashtags ONLY. Return the JSON.`;
+    requestUserPrompt = `INFLUENCER IDENTITY:
+Username: @${username}
+Name: ${fullname}
+Bio: ${bio || "None"}
+Database Categories: ${existingCategories || "None"}
+
+LAST 12 POST CAPTIONS:
+${captions.join("\n\n")}
+
+ALL HASHTAGS USED:
+${allHashtags.slice(0, 50).join(", ")}
+
+Classify this influencer. Use IDENTITY first, then CONFIRM with post content. Return the JSON.`;
   }
 
   return {
@@ -232,6 +248,12 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
       });
 
       // Save chunk metadata to MongoDB — only include actually processed influencers
+      // Build shortcode map: influencer_id -> [shortcodes used for analysis]
+      const shortcodeMap = {};
+      for (const item of chunk) {
+        shortcodeMap[item.inf._id.toString()] = (item.posts || []).map(p => p.post_shortcode).filter(Boolean);
+      }
+
       const jobDoc = {
         batch_id: batchResponse.id,
         status: batchResponse.status,
@@ -243,6 +265,7 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
         tokens: 0,
         cost: 0,
         influencer_ids: processedIds,
+        shortcode_map: shortcodeMap,
         created_at: new Date(),
         completed_at: null,
         error: null,
@@ -526,6 +549,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
         sub_categories: parsed.sub_categories || [],
         tokens: { input: inputTokensForResult, output: outputTokensForResult },
         cost: parseFloat(costForResult.toFixed(5)),
+        analyzed_post_shortcodes: (jobMeta.shortcode_map || {})[influencerId] || [],
       });
 
       // If category is null, increment retry counter on the influencer
@@ -575,6 +599,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
               "categories": [parsed.category],
               "primary_category": parsed.category,
               "secondary_categories": parsed.sub_categories || [],
+              "analyzed_post_shortcodes": (jobMeta.shortcode_map || {})[influencerId] || [],
             },
           },
         },
