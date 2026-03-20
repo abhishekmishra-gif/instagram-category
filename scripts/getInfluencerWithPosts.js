@@ -12,7 +12,6 @@ const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.DB_NAME;
 const INFLUENCER_COLLECTION = process.env.INFLUENCER_COLLECTION;
 const POSTS_COLLECTION = process.env.POSTS_COLLECTION;
-const POST_LIMIT = 12;
 
 async function getInfluencerWithPosts(influencerId) {
     const client = new MongoClient(MONGO_URI, {
@@ -52,12 +51,11 @@ async function getInfluencerWithPosts(influencerId) {
         console.log(`  Avg Comments: ${influencer.instagram?.average_comments || "N/A"}`);
         console.log(`  Location   : ${influencer.instagram?.location?.city || "N/A"}, ${influencer.instagram?.location?.state || "N/A"}, ${influencer.instagram?.location?.country || "N/A"}`);
 
-        // 2. Fetch 12 posts using the influencer's _id as influencer_id (stored as string)
+        // 2. Fetch all posts using the influencer's _id as influencer_id (stored as string)
         const posts = await db
             .collection(POSTS_COLLECTION)
             .find({ influencer_id: influencerId })
             .sort({ created_timestamp: -1 })
-            .limit(POST_LIMIT)
             .toArray();
 
         console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);

@@ -81,7 +81,7 @@ Name: ${fullname}
 Bio: ${bio || "None"}
 Database Categories: ${existingCategories || "None"}
 
-LAST 12 POST CAPTIONS:
+ALL POST CAPTIONS:
 ${captions.join("\n\n")}
 
 ALL HASHTAGS USED:

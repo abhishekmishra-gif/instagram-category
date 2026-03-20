@@ -154,7 +154,7 @@ async function refreshStats() {
 
         const withCategory = await chunkedCount(
             db.collection(INFLUENCER_COLLECTION),
-            { ...eligibilityFilter, "instagram.category": { $exists: true } },
+            { ...eligibilityFilter, "primary_category": { $exists: true } },
             processedObjectIds
         );
 
@@ -216,9 +216,9 @@ app.get("/api/influencers", async (req, res) => {
             .map(id => new ObjectId(id));
         query["_id"] = { $nin: processedObjectIds };
     } else if (filter === "withCategory") {
-        query["instagram.category"] = { $ne: null };
+        query["primary_category"] = { $ne: null };
     } else if (filter === "noCategory") {
-        query["instagram.category"] = null;
+        query["primary_category"] = null;
     }
 
     const [influencers, total] = await Promise.all([
@@ -247,9 +247,9 @@ app.get("/api/influencers", async (req, res) => {
             followers: inf.instagram?.follower_count || 0,
             type: inf.instagram?.influencer_type?.type || "",
             dbCategories: (inf.categories || []).join(", "),
-            category: inf.instagram?.category || null,
-            subCategories: inf.instagram?.categories || [],
-            status: cachedProcessedIds.has(inf._id.toString()) ? (inf.instagram?.category ? "categorized" : "no_category") : "pending",
+            category: inf.primary_category || null,
+            subCategories: inf.secondary_categories || [],
+            status: cachedProcessedIds.has(inf._id.toString()) ? (inf.primary_category ? "categorized" : "no_category") : "pending",
         };
     });
 
@@ -337,8 +337,9 @@ app.post("/api/process/rerun/:id", async (req, res) => {
                 { _id: new ObjectId(influencerId) },
                 {
                     $set: {
-                        "instagram.category": result.category || null,
-                        "instagram.categories": result.subCategories || [],
+                        "primary_category": result.category || null,
+                        "secondary_categories": result.subCategories || [],
+                        "categories": result.category ? [result.category] : [],
                     },
                 }
             );
@@ -490,8 +491,8 @@ app.get("/api/openai-batch/:id/influencers", async (req, res) => {
                 name: inf.fullname || inf.instagram?.handle || "",
                 handle: inf.instagram?.handle || "",
                 avatar: getAvatarUrl(inf),
-                category: isCompleted ? (inf.instagram?.category || null) : null,
-                subCategories: isCompleted ? (inf.instagram?.categories || []) : [],
+                category: isCompleted ? (inf.primary_category || null) : null,
+                subCategories: isCompleted ? (inf.secondary_categories || []) : [],
                 cost: costMap[infId] || 0
             };
         });
@@ -672,8 +673,9 @@ async function runBatch(docLimit, batchSize) {
                             { _id: new ObjectId(id) },
                             {
                                 $set: {
-                                    "instagram.category": result.category || null,
-                                    "instagram.categories": result.subCategories || [],
+                                    "primary_category": result.category || null,
+                                    "secondary_categories": result.subCategories || [],
+                                    "categories": result.category ? [result.category] : [],
                                 },
                             }
                         );

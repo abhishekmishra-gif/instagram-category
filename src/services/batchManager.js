@@ -58,7 +58,7 @@ RESPOND IN THIS EXACT JSON FORMAT:
 function buildBatchRequestLine(inf, posts) {
   const username = inf.instagram?.handle || inf.username || "";
   const fullname = inf.fullname || "";
-  const existingCategories = (inf.instagram.categories || []).join(", ");
+  const existingCategories = (inf.categories || inf.secondary_categories || []).join(", ");
   const bio = inf.instagram?.biography || "";
 
   const captions = (posts || []).map((p, i) => {
@@ -106,7 +106,7 @@ Name: ${fullname}
 Bio: ${bio || "None"}
 Database Categories: ${existingCategories || "None"}
 
-LAST 12 POST CAPTIONS:
+ALL POST CAPTIONS:
 ${captions.join("\n\n")}
 
 ALL HASHTAGS USED:
@@ -188,7 +188,6 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
           .collection(POSTS_COLLECTION)
           .find({ influencer_id: inf._id.toString() })
           .sort({ created_timestamp: -1 })
-          .limit(12)
           .toArray();
 
         if (!posts || posts.length === 0) {
@@ -318,7 +317,7 @@ async function rerunFailedBatch(batchId) {
     // Clear any existing AI category data the old batch might have temporarily set
     await db.collection(INFLUENCER_COLLECTION).updateMany(
       { _id: { $in: objectIds } },
-      { $unset: { "instagram.category": "", "instagram.categories": "" } }
+      { $unset: { "primary_category": "", "secondary_categories": "", "categories": "" } }
     );
 
     const chunk = influencers; // We assume the old batch was a chunk already
@@ -338,7 +337,6 @@ async function rerunFailedBatch(batchId) {
         .collection(POSTS_COLLECTION)
         .find({ influencer_id: inf._id.toString() })
         .sort({ created_timestamp: -1 })
-        .limit(12)
         .toArray();
 
       // Skip influencers with no posts in the database
@@ -567,7 +565,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
         if (attempts >= 3) {
           await db.collection(INFLUENCER_COLLECTION).updateOne(
             { _id: new ObjectId(influencerId) },
-            { $set: { "instagram.category": null } }
+            { $set: { "primary_category": null, "categories": [], "secondary_categories": [] } }
           );
         }
         continue;
@@ -1013,7 +1011,6 @@ async function resumeCancelledBatches() {
           .collection(POSTS_COLLECTION)
           .find({ influencer_id: inf._id.toString() })
           .sort({ created_timestamp: -1 })
-          .limit(12)
           .toArray();
 
         const requestLine = buildBatchRequestLine(inf, posts);
