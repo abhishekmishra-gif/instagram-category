@@ -179,6 +179,7 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
             { "instagram.ai_attempts": { $lt: 3 } }
           ]
         })
+        .sort({ updated_at: -1 })
         .limit(totalLimit - validInfluencers.length + 20) // Over-fetch slightly to account for skips
         .toArray();
 
