@@ -169,7 +169,6 @@ async function refreshStats() {
 
         cachedStats = { total, processed, withCategory, noCategory, pending, totalCost };
         statsReady = true;
-        console.log(`📊 Stats refreshed: total=${total}, processed=${processed}, pending=${pending}`);
     } catch (e) {
         console.error("Failed to refresh stats:", e.message);
     }
