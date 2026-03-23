@@ -135,7 +135,7 @@ async function refreshStats() {
     try {
         const eligibilityFilter = {
             "instagram.follower_count_actual": { $gte: 1000 },
-            "instagram.media_count": { $gte: 10 },
+            "instagram.media_count": { $gte: 15 },
             "instagram.is_private": false,
         };
 
@@ -340,6 +340,8 @@ app.post("/api/process/rerun/:id", async (req, res) => {
                         "primary_category": result.category || null,
                         "secondary_categories": result.subCategories || [],
                         "categories": result.category ? [result.category] : [],
+                        "niche": result.niche || null,
+                        "niche_explanation": result.nicheExplanation || null,
                     },
                 }
             );
@@ -493,6 +495,8 @@ app.get("/api/openai-batch/:id/influencers", async (req, res) => {
                 avatar: getAvatarUrl(inf),
                 category: isCompleted ? (inf.primary_category || null) : null,
                 subCategories: isCompleted ? (inf.secondary_categories || []) : [],
+                niche: isCompleted ? (inf.niche || null) : null,
+                nicheExplanation: isCompleted ? (inf.niche_explanation || null) : null,
                 cost: costMap[infId] || 0
             };
         });
@@ -676,6 +680,8 @@ async function runBatch(docLimit, batchSize) {
                                     "primary_category": result.category || null,
                                     "secondary_categories": result.subCategories || [],
                                     "categories": result.category ? [result.category] : [],
+                                    "niche": result.niche || null,
+                                    "niche_explanation": result.nicheExplanation || null,
                                 },
                             }
                         );

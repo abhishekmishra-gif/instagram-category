@@ -172,7 +172,7 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
         .find({
           _id: { $nin: [...allBatchedInfluencerIds, ...allSkippedIds, ...validIds] },
           "instagram.follower_count_actual": { $gte: 1000 },
-          "instagram.media_count": { $gte: 10 },
+          "instagram.media_count": { $gte: 15 },
           "instagram.is_private": false,
           $or: [
             { "instagram.ai_attempts": { $exists: false } },
@@ -600,6 +600,8 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
               "categories": [parsed.category],
               "primary_category": parsed.category,
               "secondary_categories": parsed.sub_categories || [],
+              "niche": parsed.niche || null,
+              "niche_explanation": parsed.niche_explanation || null,
               "analyzed_post_shortcodes": (jobMeta.shortcode_map || {})[influencerId] || [],
             },
           },
