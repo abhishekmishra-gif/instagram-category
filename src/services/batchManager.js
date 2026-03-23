@@ -20,19 +20,24 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const { CATEGORY_PROMPT, CATEGORY_NAMES } = require("../data/categories");
 
-const systemPrompt = `You are an expert Instagram influencer category classifier. Analyze the content and pick the single BEST category and ALL genuinely relevant sub-categories.
+const systemPrompt = `You are an expert Instagram influencer category classifier. You will receive the influencer's IDENTITY (username, name, bio, existing database categories) and their recent POST CONTENT (captions + hashtags).
 
 CATEGORIES & THEIR SUB-CATEGORIES (pick ONLY from these):
 ${CATEGORY_PROMPT}
 
-RULES:
-1. Pick the MOST DOMINANT category across ALL 12 captions.
-2. Pick ALL sub-categories that genuinely match this influencer from the chosen category's list.
-3. Only include sub-categories with real evidence in the content.
-4. Only raw JSON, no markdown.
+CLASSIFICATION RULES:
+1. POST CONTENT is your PRIMARY evidence. Analyze all captions and hashtags to determine what the influencer actually does professionally.
+2. IGNORE paid/sponsored posts and brand collaborations (#ad, brand mentions, product promos) — these are advertisements, NOT identity signals. Celebrities endorse brands regardless of their actual profession.
+3. Give EXTRA WEIGHT to posts about: movie/film/song releases, professional achievements, awards, tournaments, career announcements, or creative work — these reveal the true profession.
+4. USERNAME and BIO are SECONDARY hints. If the username contains a clear profession keyword (e.g. "gaming", "chef", "fitness"), factor it in strongly.
+5. DATABASE CATEGORIES may be INCORRECT. Treat them as a reference only — always verify against post content. If posts clearly contradict the DB category, trust the posts.
+6. Do NOT confuse lifestyle/personal posts with the influencer's profession. A sports star posting family photos is still in Sports. An actress posting fashion photos is still in Entertainment.
+7. Pick ALL sub-categories that genuinely match from the chosen category's list.
+8. NICHE must describe WHO the influencer IS (their professional identity/role), NOT what their posts are about. Examples: "Bollywood Actress", "Cricket Player", "Skincare Blogger", "Tech YouTuber", "Fitness Coach", "Stand-up Comedian" etc. It should be a concise 1-3 word label of their real-world profession or creator identity.
+9. Only raw JSON, no markdown.
 
 RESPOND IN THIS EXACT JSON FORMAT:
-{"category":"Category Name","sub_categories":["Sub 1","Sub 2"],"confidence":95,"reasoning":"Brief reason"}`;
+{"category":"Category Name","sub_categories":["Sub 1","Sub 2"],"niche":"Niche Label","niche_explanation":"1 sentence explanation referencing specific content signals."}`;
 
 const fallbackSystemPrompt = `You are an Instagram influencer category classifier. You have NO post content to analyze. Use ONLY the username, bio, and existing database categories to guess the BEST category.
 
@@ -44,9 +49,11 @@ RULES:
 2. If the database category clearly maps to one of the valid categories, use it.
 3. If nothing matches confidently, return null as the category.
 4. Only raw JSON, no markdown.
+5. For niche_explanation, briefly reference which bio keyword or username pattern drove the niche decision. If niche is null, set niche_explanation to null as well.
+6. Only raw JSON, no markdown.
 
 RESPOND IN THIS EXACT JSON FORMAT:
-{"category":"Category Name","sub_categories":["Sub 1"],"confidence":60,"reasoning":"Brief reason"}`;
+{"category":"Category Name","sub_categories":["Sub 1"],"confidence":60,"reasoning":"Brief reason","niche":"Niche Label","niche_explanation":"1-2 sentence explanation referencing bio or username signals."}`;
 
 /**
  * Format identically to categoryFinder.js and handle fallbacks
@@ -54,7 +61,7 @@ RESPOND IN THIS EXACT JSON FORMAT:
 function buildBatchRequestLine(inf, posts) {
   const username = inf.instagram?.handle || inf.username || "";
   const fullname = inf.fullname || "";
-  const existingCategories = (inf.instagram.categories || []).join(", ");
+  const existingCategories = (inf.categories || inf.secondary_categories || []).join(", ");
   const bio = inf.instagram?.biography || "";
 
   const captions = (posts || []).map((p, i) => {
@@ -96,7 +103,19 @@ function buildBatchRequestLine(inf, posts) {
     maxTokens = 200;
   } else {
     requestSystemPrompt = systemPrompt;
-    requestUserPrompt = `LAST 12 POST CAPTIONS:\n${captions.join("\n\n")}\n\nALL HASHTAGS USED:\n${allHashtags.slice(0, 50).join(", ")}\n\nAnalyze the above captions and hashtags ONLY. Return the JSON.`;
+    requestUserPrompt = `INFLUENCER IDENTITY:
+Username: @${username}
+Name: ${fullname}
+Bio: ${bio || "None"}
+Database Categories: ${existingCategories || "None"}
+
+ALL POST CAPTIONS:
+${captions.join("\n\n")}
+
+ALL HASHTAGS USED:
+${allHashtags.slice(0, 50).join(", ")}
+
+Classify this influencer. Use IDENTITY first, then CONFIRM with post content. Return the JSON.`;
   }
 
   return {
@@ -153,13 +172,14 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
         .find({
           _id: { $nin: [...allBatchedInfluencerIds, ...allSkippedIds, ...validIds] },
           "instagram.follower_count_actual": { $gte: 1000 },
-          "instagram.media_count": { $gte: 10 },
+          "instagram.media_count": { $gte: 15 },
           "instagram.is_private": false,
           $or: [
             { "instagram.ai_attempts": { $exists: false } },
             { "instagram.ai_attempts": { $lt: 3 } }
           ]
         })
+        .sort({ updated_at: -1 })
         .limit(totalLimit - validInfluencers.length + 20) // Over-fetch slightly to account for skips
         .toArray();
 
@@ -172,7 +192,6 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
           .collection(POSTS_COLLECTION)
           .find({ influencer_id: inf._id.toString() })
           .sort({ created_timestamp: -1 })
-          .limit(12)
           .toArray();
 
         if (!posts || posts.length === 0) {
@@ -232,6 +251,12 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
       });
 
       // Save chunk metadata to MongoDB — only include actually processed influencers
+      // Build shortcode map: influencer_id -> [shortcodes used for analysis]
+      const shortcodeMap = {};
+      for (const item of chunk) {
+        shortcodeMap[item.inf._id.toString()] = (item.posts || []).map(p => p.post_shortcode).filter(Boolean);
+      }
+
       const jobDoc = {
         batch_id: batchResponse.id,
         status: batchResponse.status,
@@ -243,6 +268,7 @@ async function scheduleAdvancedBatches(totalLimit = 100, chunkSize = 100) {
         tokens: 0,
         cost: 0,
         influencer_ids: processedIds,
+        shortcode_map: shortcodeMap,
         created_at: new Date(),
         completed_at: null,
         error: null,
@@ -295,7 +321,7 @@ async function rerunFailedBatch(batchId) {
     // Clear any existing AI category data the old batch might have temporarily set
     await db.collection(INFLUENCER_COLLECTION).updateMany(
       { _id: { $in: objectIds } },
-      { $unset: { "instagram.category": "", "instagram.categories": "" } }
+      { $unset: { "primary_category": "", "secondary_categories": "", "categories": "" } }
     );
 
     const chunk = influencers; // We assume the old batch was a chunk already
@@ -315,7 +341,6 @@ async function rerunFailedBatch(batchId) {
         .collection(POSTS_COLLECTION)
         .find({ influencer_id: inf._id.toString() })
         .sort({ created_timestamp: -1 })
-        .limit(12)
         .toArray();
 
       // Skip influencers with no posts in the database
@@ -526,6 +551,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
         sub_categories: parsed.sub_categories || [],
         tokens: { input: inputTokensForResult, output: outputTokensForResult },
         cost: parseFloat(costForResult.toFixed(5)),
+        analyzed_post_shortcodes: (jobMeta.shortcode_map || {})[influencerId] || [],
       });
 
       // If category is null, increment retry counter on the influencer
@@ -543,7 +569,7 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
         if (attempts >= 3) {
           await db.collection(INFLUENCER_COLLECTION).updateOne(
             { _id: new ObjectId(influencerId) },
-            { $set: { "instagram.category": null } }
+            { $set: { "primary_category": null, "categories": [], "secondary_categories": [] } }
           );
         }
         continue;
@@ -572,13 +598,12 @@ async function ingestCompletedBatch(db, fileId, jobMeta) {
           },
           update: {
             $set: {
-              "categories": Array.isArray(parsed.sub_categories) && parsed.sub_categories.length > 0
-                ? [parsed.sub_categories[0]]
-                : [],
+              "categories": [parsed.category],
               "primary_category": parsed.category,
               "secondary_categories": parsed.sub_categories || [],
-              "instagram.category": parsed.category,
-              "instagram.categories": parsed.sub_categories || [],
+              "niche": parsed.niche || null,
+              "niche_explanation": parsed.niche_explanation || null,
+              "analyzed_post_shortcodes": (jobMeta.shortcode_map || {})[influencerId] || [],
             },
           },
         },
@@ -792,9 +817,23 @@ async function runContinuousBatchLoop() {
         }
 
         if (orchestratorState.isRunning) {
-          // Wait for a short interval before polling the queue again and topping it off
+          // Dynamic throttling: scale delay based on in-progress influencer count
+          const activeJobs = await db.collection(BATCH_JOBS_COLLECTION)
+            .find({ status: { $in: ["validating", "in_progress", "finalizing", "in_queue"] } })
+            .project({ influencer_ids: 1 })
+            .toArray();
+          const inProgressCount = activeJobs.reduce((sum, j) => sum + (j.influencer_ids?.length || 0), 0);
+
+          let dynamicDelay = orchestratorState.delayMs; // 10s baseline
+          if (inProgressCount >= 5000) dynamicDelay = 120000;       // 2 min
+          else if (inProgressCount >= 2000) dynamicDelay = 60000;   // 1 min
+          else if (inProgressCount >= 500) dynamicDelay = 30000;    // 30s
+          // else 10s baseline
+
+          console.log(`[Orchestrator] In-progress: ${inProgressCount} influencers → delay: ${dynamicDelay / 1000}s`);
+
           await new Promise((resolve) =>
-            setTimeout(resolve, orchestratorState.delayMs),
+            setTimeout(resolve, dynamicDelay),
           );
         }
       } catch (err) {
@@ -978,7 +1017,6 @@ async function resumeCancelledBatches() {
           .collection(POSTS_COLLECTION)
           .find({ influencer_id: inf._id.toString() })
           .sort({ created_timestamp: -1 })
-          .limit(12)
           .toArray();
 
         const requestLine = buildBatchRequestLine(inf, posts);

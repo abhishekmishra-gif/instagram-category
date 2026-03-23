@@ -14,6 +14,13 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
+    <!-- Dashboard Loading Overlay -->
+    <div id="dashboardLoader" style="display: flex; position: fixed; inset: 0; z-index: 9999; background: var(--bg-primary, #0a0e1a); align-items: center; justify-content: center; flex-direction: column; gap: 16px;">
+      <div style="width: 40px; height: 40px; border: 3px solid rgba(99,102,241,0.2); border-top-color: #6366f1; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+      <span style="color: #94a3b8; font-family: 'Inter', sans-serif; font-size: 14px; font-weight: 500;">Loading Dashboard...</span>
+      <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
@@ -203,7 +210,7 @@
               <span class="cmd-status-sep">|</span>
               <span class="status-metric"><strong id="sessionQueuedText">0</strong> queued</span>
               <span class="cmd-status-dot-sep">·</span>
-              <span class="status-metric"><strong id="sessionPendingText">0</strong> awaiting</span>
+              <span class="status-metric"><strong id="sessionPendingText">0</strong> awaiting (Influencer with post)</span>
             </div>
             <span class="cmd-status-pct" id="sessionPct">0%</span>
           </div>

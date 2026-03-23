@@ -9,7 +9,6 @@ const MONGO_URI = process.env.MONGO_URI;
 const DB_NAME = process.env.DB_NAME;
 const INFLUENCER_COLLECTION = process.env.INFLUENCER_COLLECTION;
 const POSTS_COLLECTION = process.env.POSTS_COLLECTION;
-const POST_LIMIT = 12;
 const BATCH_SIZE = 10;
 
 async function processInfluencer(db, influencerId) {
@@ -26,7 +25,6 @@ async function processInfluencer(db, influencerId) {
         .collection(POSTS_COLLECTION)
         .find({ influencer_id: influencerId })
         .sort({ created_timestamp: -1 })
-        .limit(POST_LIMIT)
         .toArray();
 
     const categoryResult = await findCategories(influencer, posts);
@@ -109,8 +107,9 @@ async function runBatchJob() {
                             { _id: new ObjectId(INFLUENCER_ID) },
                             {
                                 $set: {
-                                    "instagram.category": result.category,
-                                    "instagram.categories": result.subCategories,
+                                    "primary_category": result.category,
+                                    "secondary_categories": result.subCategories,
+                                    "categories": result.category ? [result.category] : [],
                                 },
                             }
                         );

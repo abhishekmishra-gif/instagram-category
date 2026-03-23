@@ -133,40 +133,29 @@ let statsReady = false;
 
 async function refreshStats() {
     try {
-        const objectIdsWithPosts = [...cachedIdsWithPosts]
+        const eligibilityFilter = {
+            "instagram.follower_count_actual": { $gte: 1000 },
+            "instagram.media_count": { $gte: 15 },
+            "instagram.is_private": false,
+        };
+
+        const total = await db.collection(INFLUENCER_COLLECTION).countDocuments(eligibilityFilter);
+
+        // Processed = eligible influencers that are in any batch job
+        const processedObjectIds = [...cachedProcessedIds]
             .filter(id => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id))
             .map(id => new ObjectId(id));
 
-        const total = await chunkedCount(
-            db.collection(INFLUENCER_COLLECTION),
-            {
-                "instagram.follower_count_actual": { $gte: 1000 },
-                "instagram.media_count": { $gte: 10 },
-                "instagram.is_private": false,
-            },
-            objectIdsWithPosts
-        );
-
-        const processedIds = objectIdsWithPosts.filter(id => cachedProcessedIds.has(id.toString()));
         const processed = await chunkedCount(
             db.collection(INFLUENCER_COLLECTION),
-            {
-                "instagram.follower_count_actual": { $gte: 1000 },
-                "instagram.media_count": { $gte: 10 },
-                "instagram.is_private": false,
-            },
-            processedIds
+            eligibilityFilter,
+            processedObjectIds
         );
 
         const withCategory = await chunkedCount(
             db.collection(INFLUENCER_COLLECTION),
-            {
-                "instagram.follower_count_actual": { $gte: 1000 },
-                "instagram.media_count": { $gte: 10 },
-                "instagram.is_private": false,
-                "instagram.category": { $ne: null, $exists: true },
-            },
-            processedIds
+            { ...eligibilityFilter, "primary_category": { $exists: true } },
+            processedObjectIds
         );
 
         const noCategory = processed - withCategory;
@@ -180,7 +169,6 @@ async function refreshStats() {
 
         cachedStats = { total, processed, withCategory, noCategory, pending, totalCost };
         statsReady = true;
-        console.log(`📊 Stats refreshed: total=${total}, processed=${processed}, pending=${pending}`);
     } catch (e) {
         console.error("Failed to refresh stats:", e.message);
     }
@@ -227,9 +215,9 @@ app.get("/api/influencers", async (req, res) => {
             .map(id => new ObjectId(id));
         query["_id"] = { $nin: processedObjectIds };
     } else if (filter === "withCategory") {
-        query["instagram.category"] = { $ne: null };
+        query["primary_category"] = { $ne: null };
     } else if (filter === "noCategory") {
-        query["instagram.category"] = null;
+        query["primary_category"] = null;
     }
 
     const [influencers, total] = await Promise.all([
@@ -258,9 +246,9 @@ app.get("/api/influencers", async (req, res) => {
             followers: inf.instagram?.follower_count || 0,
             type: inf.instagram?.influencer_type?.type || "",
             dbCategories: (inf.categories || []).join(", "),
-            category: inf.instagram?.category || null,
-            subCategories: inf.instagram?.categories || [],
-            status: cachedProcessedIds.has(inf._id.toString()) ? (inf.instagram?.category ? "categorized" : "no_category") : "pending",
+            category: inf.primary_category || null,
+            subCategories: inf.secondary_categories || [],
+            status: cachedProcessedIds.has(inf._id.toString()) ? (inf.primary_category ? "categorized" : "no_category") : "pending",
         };
     });
 
@@ -348,8 +336,11 @@ app.post("/api/process/rerun/:id", async (req, res) => {
                 { _id: new ObjectId(influencerId) },
                 {
                     $set: {
-                        "instagram.category": result.category || null,
-                        "instagram.categories": result.subCategories || [],
+                        "primary_category": result.category || null,
+                        "secondary_categories": result.subCategories || [],
+                        "categories": result.category ? [result.category] : [],
+                        "niche": result.niche || null,
+                        "niche_explanation": result.nicheExplanation || null,
                     },
                 }
             );
@@ -501,8 +492,10 @@ app.get("/api/openai-batch/:id/influencers", async (req, res) => {
                 name: inf.fullname || inf.instagram?.handle || "",
                 handle: inf.instagram?.handle || "",
                 avatar: getAvatarUrl(inf),
-                category: isCompleted ? (inf.instagram?.category || null) : null,
-                subCategories: isCompleted ? (inf.instagram?.categories || []) : [],
+                category: isCompleted ? (inf.primary_category || null) : null,
+                subCategories: isCompleted ? (inf.secondary_categories || []) : [],
+                niche: isCompleted ? (inf.niche || null) : null,
+                nicheExplanation: isCompleted ? (inf.niche_explanation || null) : null,
                 cost: costMap[infId] || 0
             };
         });
@@ -604,38 +597,13 @@ app.post("/api/openai-batch/resume", async (req, res) => {
 // API: Get Session Status
 app.get("/api/openai-batch/session/status", async (req, res) => {
     try {
+        // Lightweight: only query the small openai_batch_jobs collection
         const activeJobs = await db.collection("openai_batch_jobs")
             .find({ status: { $in: ["validating", "in_progress", "finalizing", "in_queue"] } })
+            .project({ influencer_ids: 1 })
             .toArray();
 
-        let activeInfluencerIds = [];
-        for (const job of activeJobs) {
-            if (job.influencer_ids) {
-                // Ensure they map to strings so $nin comparison is safe, or ObjectIds if DB uses them.
-                activeInfluencerIds.push(...job.influencer_ids
-                    .filter(id => (typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id)) || (id && typeof id === 'object'))
-                    .map(id => typeof id === 'string' ? new ObjectId(id) : id));
-            }
-        }
-
-        // Use cached IDs of influencers that have posts (refreshed every 60s)
-        // Exclude both active (in-progress) AND already-processed (completed) influencer IDs
-        const activeIdSet = new Set(activeInfluencerIds.map(id => id.toString()));
-        const eligibleIdsWithPosts = [...cachedIdsWithPosts]
-            .filter(id => typeof id === 'string' && /^[0-9a-fA-F]{24}$/.test(id) && !activeIdSet.has(id) && !cachedProcessedIds.has(id))
-            .map(id => new ObjectId(id));
-
-        const count = await chunkedCount(
-            db.collection(INFLUENCER_COLLECTION),
-            {
-                "instagram.follower_count_actual": { $gte: 1000 },
-                "instagram.media_count": { $gte: 10 },
-                "instagram.is_private": false
-            },
-            eligibleIdsWithPosts
-        );
-
-
+        const queuedCount = activeJobs.reduce((sum, j) => sum + (j.influencer_ids?.length || 0), 0);
 
         // Get the latest batch_id from DB
         const latestJob = await db.collection("openai_batch_jobs")
@@ -648,8 +616,8 @@ app.get("/api/openai-batch/session/status", async (req, res) => {
 
         res.json({
             ...getOrchestratorStatus(),
-            pendingDBCount: count,
-            queuedCount: activeInfluencerIds.length,
+            pendingDBCount: cachedStats.pending,
+            queuedCount,
             latestBatchId
         });
     } catch (err) {
@@ -708,8 +676,11 @@ async function runBatch(docLimit, batchSize) {
                             { _id: new ObjectId(id) },
                             {
                                 $set: {
-                                    "instagram.category": result.category || null,
-                                    "instagram.categories": result.subCategories || [],
+                                    "primary_category": result.category || null,
+                                    "secondary_categories": result.subCategories || [],
+                                    "categories": result.category ? [result.category] : [],
+                                    "niche": result.niche || null,
+                                    "niche_explanation": result.nicheExplanation || null,
                                 },
                             }
                         );

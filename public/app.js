@@ -342,6 +342,10 @@ async function showBatchDetails(batchId) {
         .map(sc => `<span class="badge badge-sm" style="background: var(--divider); color: var(--text-secondary); margin-top: 4px; display: inline-block;">${sc}</span>`)
         .join(" ");
 
+      const nicheHtml = inf.niche
+        ? `<div style="margin-top: 6px;"><span class="badge badge-sm" style="background: rgba(139,92,246,0.15); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3);" title="${(inf.nicheExplanation || '').replace(/"/g, '&quot;')}">🔬 ${inf.niche}</span></div>`
+        : "";
+
       const costHtml = inf.cost > 0
         ? `<span class="td-cost">$${inf.cost.toFixed(4)}</span>`
         : "—";
@@ -360,6 +364,7 @@ async function showBatchDetails(batchId) {
           <td>
             ${catHtml}
             <div style="margin-top: 4px;">${subCatHtml}</div>
+            ${nicheHtml}
           </td>
           <td>${costHtml}</td>
           <td>
@@ -409,7 +414,11 @@ async function analyzeInstant(influencerId, btn, batchId) {
         .map(sc => `<span class="badge badge-sm" style="background: var(--divider); color: var(--text-secondary); margin-top: 4px; display: inline-block;">${sc}</span>`)
         .join(" ");
 
-      catCell.innerHTML = `${catHtml}<div style="margin-top: 4px;">${subCatHtml}</div>`;
+      const nicheHtml = data.result.niche
+        ? `<div style="margin-top: 6px;"><span class="badge badge-sm" style="background: rgba(139,92,246,0.15); color: #a78bfa; border: 1px solid rgba(139,92,246,0.3);" title="${(data.result.nicheExplanation || '').replace(/"/g, '&quot;')}">🔬 ${data.result.niche}</span></div>`
+        : "";
+
+      catCell.innerHTML = `${catHtml}<div style="margin-top: 4px;">${subCatHtml}</div>${nicheHtml}`;
       if (costCell && data.result.cost) costCell.innerHTML = `<span class="td-cost">$${data.result.cost.toFixed(4)}</span>`;
     }
 
@@ -758,11 +767,19 @@ function initEventListeners() {
 function init() {
   initTheme();
   initEventListeners();
-  loadStats();
-  fetchJobs(1);
-  pollSessionStatus();
 
-  // Background sync every 15 seconds
+  // Show loading overlay for 5 seconds
+  const loader = document.getElementById("dashboardLoader");
+  if (loader) loader.style.display = "flex";
+
+  setTimeout(() => {
+    if (loader) loader.style.display = "none";
+    loadStats();
+    fetchJobs(1);
+    pollSessionStatus();
+  }, 5000);
+
+  // Background sync every 30 seconds
   setInterval(async () => {
     fetch("/api/openai-batch/sync", { method: "POST" })
       .then(() => {
@@ -771,7 +788,7 @@ function init() {
         loadStats();
       })
       .catch(console.error);
-  }, 15000);
+  }, 30000);
 }
 
 init();

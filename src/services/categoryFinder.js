@@ -47,6 +47,8 @@ async function findCategories(influencer, posts) {
                 postsAnalyzed: 0,
                 category: null,
                 subCategories: [],
+                niche: null,
+                nicheExplanation: null,
                 reasoning: "No posts, captions, hashtags, or profile signals available",
                 cost: 0,
                 tokens: { input: 0, output: 0 },
@@ -57,27 +59,38 @@ async function findCategories(influencer, posts) {
         return await classifyFromFallback(fullname, username, bio, existingCategories, posts?.length || 0);
     }
 
-    const systemPrompt = `You are an expert Instagram influencer category classifier. Analyze the content and pick the single BEST category and ALL genuinely relevant sub-categories.
+    const systemPrompt = `You are an expert Instagram influencer category classifier. You will receive the influencer's IDENTITY (username, name, bio, existing database categories) and their recent POST CONTENT (captions + hashtags).
 
 CATEGORIES & THEIR SUB-CATEGORIES (pick ONLY from these):
 ${CATEGORY_PROMPT}
 
-RULES:
-1. Pick the MOST DOMINANT category across ALL 12 captions.
-2. Pick ALL sub-categories that genuinely match this influencer from the chosen category's list.
-3. Only include sub-categories with real evidence in the content.
-4. Only raw JSON, no markdown.
+CLASSIFICATION RULES:
+1. POST CONTENT is your PRIMARY evidence. Analyze all captions and hashtags to determine what the influencer actually does professionally.
+2. IGNORE paid/sponsored posts and brand collaborations (#ad, brand mentions, product promos) — these are advertisements, NOT identity signals. Celebrities endorse brands regardless of their actual profession.
+3. Give EXTRA WEIGHT to posts about: movie/film/song releases, professional achievements, awards, tournaments, career announcements, or creative work — these reveal the true profession.
+4. USERNAME and BIO are SECONDARY hints. If the username contains a clear profession keyword (e.g. "gaming", "chef", "fitness"), factor it in strongly.
+5. DATABASE CATEGORIES may be INCORRECT. Treat them as a reference only — always verify against post content. If posts clearly contradict the DB category, trust the posts.
+6. Do NOT confuse lifestyle/personal posts with the influencer's profession. A sports star posting family photos is still in Sports. An actress posting fashion photos is still in Entertainment.
+7. Pick ALL sub-categories that genuinely match from the chosen category's list.
+8. NICHE must describe WHO the influencer IS (their professional identity/role), NOT what their posts are about. Examples: "Bollywood Actress", "Cricket Player", "Skincare Blogger", "Tech YouTuber", "Fitness Coach", "Stand-up Comedian". It should be a concise 1-3 word label of their real-world profession or creator identity.
+9. Only raw JSON, no markdown.
 
 RESPOND IN THIS EXACT JSON FORMAT:
-{"category":"Category Name","sub_categories":["Sub 1","Sub 2"],"confidence":95,"reasoning":"Brief reason"}`;
+{"category":"Category Name","sub_categories":["Sub 1","Sub 2"],"confidence":95,"reasoning":"Brief reason","niche":"Niche Label","niche_explanation":"1 sentence explanation referencing specific content signals."}`;
 
-    const userPrompt = `LAST 12 POST CAPTIONS:
+    const userPrompt = `INFLUENCER IDENTITY:
+Username: @${username}
+Name: ${fullname}
+Bio: ${bio || "None"}
+Database Categories: ${existingCategories || "None"}
+
+ALL POST CAPTIONS:
 ${captions.join("\n\n")}
 
 ALL HASHTAGS USED:
 ${allHashtags.slice(0, 50).join(", ")}
 
-Analyze the above captions and hashtags ONLY. Return the JSON.`;
+Classify this influencer. Use IDENTITY first, then CONFIRM with post content. Return the JSON.`;
 
     // console.log("\n🤖 Sending data to OpenAI for category analysis...");
 
@@ -132,6 +145,8 @@ Analyze the above captions and hashtags ONLY. Return the JSON.`;
             postsAnalyzed: posts.length,
             category: parsed.category,
             subCategories: parsed.sub_categories || [],
+            niche: parsed.niche || null,
+            nicheExplanation: parsed.niche_explanation || null,
             confidence: parsed.confidence + "%",
             reasoning: parsed.reasoning,
             cost: parseFloat(cost.toFixed(6)),
@@ -157,8 +172,11 @@ RULES:
 3. If nothing matches confidently, return null as the category.
 4. Only raw JSON, no markdown.
 
+5. For niche_explanation, briefly reference which bio keyword or username pattern drove the niche decision. If niche is null, set niche_explanation to null as well.
+6. Only raw JSON, no markdown.
+
 RESPOND IN THIS EXACT JSON FORMAT:
-{"category":"Category Name","sub_categories":["Sub 1"],"confidence":60,"reasoning":"Brief reason"}`;
+{"category":"Category Name","sub_categories":["Sub 1"],"confidence":60,"reasoning":"Brief reason","niche":"A single concise label (1-3 words) that best captures the influencer's overall identity (e.g., 'Tech YouTuber', 'Fitness Mom', 'Travel Vlogger', 'DIY Crafter'). This should be the most defining niche of the influencer.","niche_explanation":"A 1-2 sentence explanation of how this specific niche was determined, referencing the influencer's content themes, bio keywords, or posting patterns."}`;
 
     const userPrompt = `Username: @${username}
 Name: ${fullname}
@@ -213,6 +231,8 @@ Classify based on the above. Return ONLY the JSON.`;
             postsAnalyzed: postsCount,
             category: parsed.category,
             subCategories: parsed.category === null ? [] : (parsed.sub_categories || []),
+            niche: parsed.niche || null,
+            nicheExplanation: parsed.niche_explanation || null,
             reasoning: `[Fallback] ${parsed.reasoning}`,
             cost: parseFloat(cost.toFixed(6)),
             tokens: { input: inputTokens, output: outputTokens },
@@ -236,6 +256,9 @@ function printCategoryResult(result) {
     console.log(`  📂 Sub-Categories : ${result.subCategories.join(", ")}`);
     console.log(`  🎯 Confidence     : ${result.confidence}`);
     console.log(`  💡 Reason         : ${result.reasoning}`);
+    console.log(`  🔬 Niche          : ${result.niche || "None"}`);
+    console.log(`  📝 Niche Reason   : ${result.nicheExplanation || "—"}`);
+
     console.log("═".repeat(60) + "\n");
 }
 
