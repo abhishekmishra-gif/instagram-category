@@ -33,10 +33,11 @@ CLASSIFICATION RULES:
 5. DATABASE CATEGORIES may be INCORRECT. Treat them as a reference only — always verify against post content. If posts clearly contradict the DB category, trust the posts.
 6. Do NOT confuse lifestyle/personal posts with the influencer's profession. A sports star posting family photos is still in Sports. An actress posting fashion photos is still in Entertainment.
 7. Pick ALL sub-categories that genuinely match from the chosen category's list.
-8. Only raw JSON, no markdown.
+8. NICHE must describe WHO the influencer IS (their professional identity/role), NOT what their posts are about. Examples: "Bollywood Actress", "Cricket Player", "Skincare Blogger", "Tech YouTuber", "Fitness Coach", "Stand-up Comedian" etc. It should be a concise 1-3 word label of their real-world profession or creator identity.
+9. Only raw JSON, no markdown.
 
 RESPOND IN THIS EXACT JSON FORMAT:
-{"category":"Category Name","sub_categories":["Sub 1","Sub 2"]}`;
+{"category":"Category Name","sub_categories":["Sub 1","Sub 2"],"niche":"Niche Label","niche_explanation":"1 sentence explanation referencing specific content signals."}`;
 
 const fallbackSystemPrompt = `You are an Instagram influencer category classifier. You have NO post content to analyze. Use ONLY the username, bio, and existing database categories to guess the BEST category.
 
@@ -48,9 +49,11 @@ RULES:
 2. If the database category clearly maps to one of the valid categories, use it.
 3. If nothing matches confidently, return null as the category.
 4. Only raw JSON, no markdown.
+5. For niche_explanation, briefly reference which bio keyword or username pattern drove the niche decision. If niche is null, set niche_explanation to null as well.
+6. Only raw JSON, no markdown.
 
 RESPOND IN THIS EXACT JSON FORMAT:
-{"category":"Category Name","sub_categories":["Sub 1"],"confidence":60,"reasoning":"Brief reason"}`;
+{"category":"Category Name","sub_categories":["Sub 1"],"confidence":60,"reasoning":"Brief reason","niche":"Niche Label","niche_explanation":"1-2 sentence explanation referencing bio or username signals."}`;
 
 /**
  * Format identically to categoryFinder.js and handle fallbacks
